@@ -1,4 +1,4 @@
-# kas: KIM Attachment Search
+# KIM Attachment Search
 
 Das Addon soll die Suche innerhalb von KIM-Mails nach Metadaten vereinfachen.
 Es richtet sich an Ärzte/Ärztinnen und andere Teilnehmer des deutschen Gesundheitswesens, die an die Telematik-Infrasturktur angebunden sind und die eArztbriefe versenden und empfangen.
@@ -9,7 +9,7 @@ Sobald der eigene KIM-Account (POP3) in Thunderbird korrekt eingerichtet ist und
 Dieses Addon macht folgende Dinge:
 - Ein Suchfenster wird als Button bereitgestellt, mit dem man sehr komfortabel und schnell nach allen gewünschten Informationen suchen kann.
 - beim Öffnen einer __KIM-Mail__ wird oben im Nachrichtenkopf eine Zeile mit den Metadaten eingeblendet.
-## technische Umsetzung
+## Technische Umsetzung
 alle KIM-Accounts **<name>@<xxx>.kim.telematik** werden nach Anhängen (XML/PDF/DOCX) durchsucht, die Inhalte werden suchbar gemacht und in einer Thunderbird-eigenen Datenbank gespeichert. Gleichzeitig werden die Meta-Daten zu jeder __KIM-Mail__ erfasst.
 ## Suchfenster
 Wird im Suchfenster ein Begriff eingegeben, werden alle indexierten __KIM-Mails__ nach dem Begriff durchsucht (Beim ersten Start kann dies allerdings noch länger dauern).
