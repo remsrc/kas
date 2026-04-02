@@ -3,7 +3,8 @@
 //
 import "./libs/jszip.min.js";
 import * as pdfjsLib from "./libs/pdf.mjs";
-//pdfjsLib.GlobalWorkerOptions.workerSrc = null; // Worker deaktivieren
+import "./libs/pdf.worker.mjs";
+pdfjsLib.GlobalWorkerOptions.workerSrc = ""; // Worker deaktivieren
 
 
 //
@@ -792,8 +793,10 @@ async function extractPDF(arrayBuffer) {
         // Lade PDF ohne Worker
         const loadingTask = pdfjsLib.getDocument({
             data: arrayBuffer,
-            disableWorker: true
-        });
+            disableWorker: true,
+            useWorkerFetch: false,
+            isEvalSupported: false
+       });
 
         const pdf = await loadingTask.promise;
         let text = "";
