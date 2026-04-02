@@ -1,4 +1,11 @@
 //
+//========================================== INCLUDES ==========================================
+//
+import * as pdfjsLib from "./libs/pdf.mjs";
+pdfjsLib.GlobalWorkerOptions.workerSrc = null; // Worker deaktivieren
+
+
+//
 //========================================== CORE ==========================================
 //
 
@@ -509,7 +516,6 @@ async function rebuildIndex(folder, query = null, wholeWords = true) {
 //
 // ----------------------------------------- ATTACHMENTPROCESSOR  ----------------------------------------- 
 //
-//import { extractPDF, extractDOCX } from "../utils/extractors.js";
 
 async function processAttachment(buffer, name) {
     name = name.toLowerCase();
@@ -778,20 +784,27 @@ async function extractDOCX(arrayBuffer) {
         return "";
     }
 }
+// pdfjsLib muss über <script src="libs/pdfjs/pdf.js"></script> eingebunden sein
+
 async function extractPDF(arrayBuffer) {
     try {
+        // Lade PDF ohne Worker
         const loadingTask = pdfjsLib.getDocument({
             data: arrayBuffer,
-            disableWorker: true
         });
+
         const pdf = await loadingTask.promise;
         let text = "";
-        const maxPages =  pdf.numPages;
-        for (let i = 1; i <= maxPages; i++) {
+
+        for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
-            text += " " + content.items.map(i => i.str).join(" ");
+
+            // text zusammenfügen
+            const pageText = content.items.map(item => item.str).join(" ");
+            text += pageText + "\n";
         }
+
         return text.replace(/\s+/g, " ").trim();
     } catch (e) {
         console.error("PDF Fehler:", e);
@@ -1089,13 +1102,20 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
             }
             const meta = await getMeta(message);        
             if (meta && meta.patient) {
-            const anrede = meta.gender === "M" ? "Herr" : meta.gender === "F" ? "Frau" : "";
-                const metaLine = `<strong>eArztbrief</strong> vom ${formatXfaDateLocal(meta.docDate)} ` +
-                `(über ${anrede} <strong>${meta.patient}</strong>, geb: ${formatXfaDateLocal(meta.birth)}): ` +
-                `<strong>von Arzt:</strong> ${meta.doctor || "nicht angegeben"}, <strong>Praxis:</strong> ${meta.practice || "nicht angegeben"}`;
-                return { data: metaLine };
+                const anrede = meta.gender === "M" ? "Herr" : meta.gender === "F" ? "Frau" : "";
+                const data = [
+                    { text: "eArztbrief", bold: true },
+                    { text: ` vom ${formatXfaDateLocal(meta.docDate)} (über ${anrede} ` },
+                    { text: meta.patient, bold: true },
+                    { text: `, geb: ${formatXfaDateLocal(meta.birth)}): ` },
+                    { text: "von Arzt:", bold: true },
+                    { text: ` ${meta.doctor || "nicht angegeben"}, ` },
+                    { text: "Praxis:", bold: true },
+                    { text: ` ${meta.practice || "nicht angegeben"}` }
+                ];
+                return { data };
             } else {
-                return { data: "(noch) keine Metadaten vorhanden ..."};
+                return { data: [{ text: "(noch) keine Metadaten vorhanden ..." }] };
             }
         } else {
             return { data: null };

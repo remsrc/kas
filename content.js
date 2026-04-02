@@ -24,7 +24,18 @@ function showInfoBar(data) {
         document.body.prepend(bar);
     }
 
-    bar.innerHTML = data;
+    bar.textContent = "";
+    if (Array.isArray(data)) {
+        for (const part of data) {
+            if (part.bold) {
+                const strong = document.createElement("strong");
+                strong.textContent = part.text;
+                bar.appendChild(strong);
+            } else {
+                bar.appendChild(document.createTextNode(part.text));
+            }
+        }
+    }
 }
 
 init();
