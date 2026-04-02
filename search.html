@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>KIM Anhangsuche</title>
+  <link rel="stylesheet" href="assets/css/search.css">
+</head>
+
+<body>
+
+<div class="header">
+  <h3>KIM Anhangsuche</h3>
+  <div id="inactivityTimer">timer</div>
+</div>
+<select id="accountSelect" class="accounts"></select>
+<br>
+<input id="query" type="text" placeholder="Suchstring in Anhängen" />
+
+<div id="controls">
+  <button id="run" title="Suche starten">Suche</button>
+  <button id="rebuildIndex" title="Suchindex neu aufbauen">🔄</button>
+<!--  <button id="abort">Abbrechen</button> -->
+<!--  <button id="close">Schließen</button> -->
+</div>
+
+<div id="options">
+  <label>
+  <input type="checkbox" id="whole-words" checked />
+  Nur ganze Wörter suchen
+</label>
+</div>
+
+<div id="indexStatus"></div>
+<div id="resultStatus"></div>
+<div id="results"></div>
+<script src="search.js"></script>
+
+</body>
+</html>

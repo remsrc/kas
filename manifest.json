@@ -1,0 +1,40 @@
+{
+    "manifest_version": 3,
+    "name": "KIM Attachment Search",
+    "description": "Sucht in KIM-Anhängen (XML/PDF/DOCX) und zeigt Meta-Daten",
+    "version": "1.0.0.3",
+    "author": "rem",
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "addons.webextension.thunderbird-kim-plugin@gematik.de",
+            "strict_min_version": "128.0"
+        }
+    },
+    "permissions": [
+        "messagesRead",
+        "messagesTagsList",
+        "accountsRead",
+        "tabs",
+        "storage",
+        "scripting"
+    ],
+    "background": {
+        "scripts": [
+            "libs/jszip.min.js",
+            "libs/pdfjs/pdf.js",
+            "background.js"
+        ]
+    },
+    "icons": {
+        "64": "images/kas64.png",
+        "32": "images/kas32.png",
+        "16": "images/kas16.png"
+    },
+    "action": {
+        "default_title": "KIM-Anhangsuche",
+        "default_icon": {
+            "16": "images/kas16.png",
+            "32": "images/kas32.png"
+        }
+    }
+ }

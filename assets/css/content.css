@@ -1,0 +1,10 @@
+
+.kas2-bar {
+            background: #fff9c4;
+            border-bottom: 1px solid #ffe082;
+            padding: 8px;
+            font-size: 13px;
+            font-family: sans-serif;
+            color: #5d4037;
+            z-index: 9999;
+}
