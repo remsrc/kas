@@ -1,7 +1,7 @@
 # KIM Attachment Search
 
 Das Addon soll die Suche innerhalb von KIM-Mails nach Metadaten vereinfachen.
-Es richtet sich an Ärzte/Ärztinnen und andere Teilnehmer des deutschen Gesundheitswesens, die an die Telematik-Infrasturktur angebunden sind und die eArztbriefe versenden und empfangen.
+Es richtet sich an Ärzte/Ärztinnen und andere Teilnehmer des deutschen Gesundheitswesens, die an die Telematik-Infrastruktur angebunden sind und die eArztbriefe versenden und empfangen.
 ## Ausgangslage
 Die Besonderheit von __KIM-Mails__ mit eArztbriefen ist, dass die eigentliche Information (Patient, Arzt und Praxis, Befund) in einem PDF- oder DOCX-Anhang steht und die Meta-Daten (Dokumentdatum, Patient, Geburtsdatum, Geschlecht, Arzt und Arztpraxis) in einem XML-Dokument verborgen sind.
 Sobald der eigene KIM-Account (POP3) in Thunderbird korrekt eingerichtet ist und Mails empfangen werden können, sieht die Nachrichtenliste meist sehr ernüchternd aus. Ausser "Betreff: Arztbrief" und im Nachrichteninhalt "eArztbrief" sieht man nicht, für welchen Patienten dieser Brief geschrieben wurde.
