@@ -1,8 +1,9 @@
 //
 //========================================== INCLUDES ==========================================
 //
+import "./libs/jszip.min.js";
 import * as pdfjsLib from "./libs/pdf.mjs";
-pdfjsLib.GlobalWorkerOptions.workerSrc = null; // Worker deaktivieren
+//pdfjsLib.GlobalWorkerOptions.workerSrc = null; // Worker deaktivieren
 
 
 //
@@ -791,6 +792,7 @@ async function extractPDF(arrayBuffer) {
         // Lade PDF ohne Worker
         const loadingTask = pdfjsLib.getDocument({
             data: arrayBuffer,
+            disableWorker: true
         });
 
         const pdf = await loadingTask.promise;
@@ -993,11 +995,7 @@ async function getInboxFolderFromAccountId(accountId) {
     }
     return findInboxByPath(folders);
 }
-function collectAllParts(node, parts) {
-    if (node.parts)
-        node.parts.forEach(p => collectAllParts(p, parts));
-    parts.push(node);
-}
+
 //
 // ----------------------------- OPEN ATTACHMENT --------------------------------
 //

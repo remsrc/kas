@@ -19,11 +19,8 @@
         "scripting"
     ],
     "background": {
-        "scripts": [
-            "libs/jszip.min.js",
-            "libs/pdf-lib.min.js",
-            "background.js"
-        ]
+        "scripts": ["background.js"],
+        "type": "module"
     },
     "icons": {
         "64": "images/kas64.png",
