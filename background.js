@@ -1,65 +1,74 @@
+// for full logging, set true
+const DEBUG = false;
+// deletes the database
+const DEBUG_RESET_INDEX = false;
+// for testing without KIM-Account, set true
+const ADDONTEST = false;
 //
 //========================================== INCLUDES ==========================================
 //
 import "./libs/jszip.min.js";
 import * as pdfjsLib from "./libs/pdf.mjs";
-import "./libs/pdf.worker.mjs";
-pdfjsLib.GlobalWorkerOptions.workerSrc = ""; // Worker deaktivieren
-
-
+// PDF.js Worker explizit über Add-on-URL referenzieren.
+// Das ist stabiler als nur ein side-effect import.
+pdfjsLib.GlobalWorkerOptions.workerSrc = browser.runtime.getURL("libs/pdf.worker.mjs");
 //
 //========================================== CORE ==========================================
 //
-
 //
-// ----------------------------------------- DB ----------------------------------------- 
+// ----------------------------------------- DB -----------------------------------------
 //
 let db = null;
 let dbInitPromise = null;
-
 async function initDB() {
-    if (db) return db;
-    if (dbInitPromise) return dbInitPromise;
-
+    if (db)
+        return db;
+    if (dbInitPromise)
+        return dbInitPromise;
     dbInitPromise = new Promise((resolve, reject) => {
-        const req = indexedDB.open("kimAttachmentIndex", 7);
-
+        const req = indexedDB.open("kimAttachmentIndex", 8);
         req.onupgradeneeded = (event) => {
             const db = event.target.result;
-
             if (!db.objectStoreNames.contains("attachments")) {
-                const store = db.createObjectStore("attachments", { keyPath: "id" });
-                store.createIndex("tokens", "tokens", { multiEntry: true });
+                const store = db.createObjectStore("attachments", {
+                    keyPath: "id"
+                });
+                store.createIndex("tokens", "tokens", {
+                    multiEntry: true
+                });
                 store.createIndex("messageKey", "messageKey");
-                store.createIndex("hash", "hash");
-                store.createIndex("tokenized", "tokenized", {unique: false });
-                store.createIndex("type", "type", { unique: false });
+//                store.createIndex("hash", "hash");
+                store.createIndex("tokenized", "tokenized", {
+                    unique: false
+                });
+                store.createIndex("type", "type", {
+                    unique: false
+                });
             }
-
             if (!db.objectStoreNames.contains("messages")) {
-                db.createObjectStore("messages", { keyPath: "messageKey" });
+                db.createObjectStore("messages", {
+                    keyPath: "messageKey"
+                });
             }
-
             if (!db.objectStoreNames.contains("settings")) {
-                db.createObjectStore("settings", { keyPath: "key" });
+                db.createObjectStore("settings", {
+                    keyPath: "key"
+                });
             }
-
             if (!db.objectStoreNames.contains("tokenStats")) {
-                db.createObjectStore("tokenStats", { keyPath: "token" });
+                db.createObjectStore("tokenStats", {
+                    keyPath: "token"
+                });
             }
         };
-
         req.onsuccess = () => {
             db = req.result;
             resolve(db);
         };
-
         req.onerror = () => reject(req.error);
     });
-
     return dbInitPromise;
 }
-
 async function tx(store, mode = "readonly") {
     const db = await initDB();
     return db.transaction(store, mode).objectStore(store);
@@ -68,12 +77,6 @@ async function put(storeName, value) {
     const store = await tx(storeName, "readwrite");
     return promisify(store.put(value));
 }
-
-async function getAll(storeName) {
-    const store = await tx(storeName);
-    return promisify(store.getAll());
-}
-
 async function messageAlreadyIndexed(messageId, folderId) {
     const store = await tx("messages");
     const key = makeMessageKey(folderId, messageId);
@@ -82,10 +85,8 @@ async function messageAlreadyIndexed(messageId, folderId) {
 }
 async function getIndexedAttachments(messageKey) {
     const store = await tx("attachments");
-
     // Dexie / Wrapper: getAll liefert Array
     let all = await store.index("messageKey").getAll(messageKey);
-
     // Sicherstellen, dass es ein Array ist
     if (!Array.isArray(all)) {
         all = [];
@@ -93,7 +94,7 @@ async function getIndexedAttachments(messageKey) {
     return all;
 }
 //
-// Neu: Metadaten speichern
+// Metadaten speichern
 //
 async function saveMessageMeta(messageId, meta) {
     if (!meta)
@@ -136,6 +137,8 @@ async function saveMessageMeta(messageId, meta) {
                 docDate: meta.docDate || existing.docDate || ""
             };
             store.put(entry);
+            // Cache aktuell halten
+            metaCache.set(messageKey, entry);
         };
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
@@ -151,9 +154,8 @@ async function getMessageMeta(messageKey) {
         req.onerror = () => resolve({});
     });
 }
-
 //
-// ----------------------------------------- QUERY ----------------------------------------- 
+// ----------------------------------------- QUERY -----------------------------------------
 //
 //
 // ================= GOOGLE QUERY PARSER =================
@@ -165,24 +167,24 @@ function parseQuery(query) {
     const or = [];
     const isAll = query === "*";
     const phraseRegex = /"([^"]+)"/g;
-	if (query) { 
-		let match;
-		while ((match = phraseRegex.exec(query)) !== null) {
-			phrases.push(match[1].toLowerCase());
-		}
-		query = query.replace(phraseRegex, "");
-		const parts = query.split(/\s+/).filter(Boolean);
-		for (let p of parts) {
-			if (p.startsWith("-"))
-				not.push(p.substring(1).toLowerCase());
-			else if (p.toUpperCase() === "OR")
-				continue;
-			else if (p.includes("|"))
-				or.push(...p.split("|").map(v => v.toLowerCase()));
-			else
-				tokens.push(p.toLowerCase());
-		}
-	}
+    if (query) {
+        let match;
+        while ((match = phraseRegex.exec(query)) !== null) {
+            phrases.push(match[1].toLowerCase());
+        }
+        query = query.replace(phraseRegex, "");
+        const parts = query.split(/\s+/).filter(Boolean);
+        for (let p of parts) {
+            if (p.startsWith("-"))
+                not.push(p.substring(1).toLowerCase());
+            else if (p.toUpperCase() === "OR")
+                continue;
+            else if (p.includes("|"))
+                or.push(...p.split("|").map(v => v.toLowerCase()));
+            else
+                tokens.push(p.toLowerCase());
+        }
+    }
     return {
         tokens,
         phrases,
@@ -191,245 +193,224 @@ function parseQuery(query) {
         isAll
     };
 }
-
-// function matchQuery(text, q) {
-    // text = text.toLowerCase();
-
-    // for (const p of q.phrases)
-        // if (!text.includes(p)) return false;
-
-    // for (const n of q.not)
-        // if (text.includes(n)) return false;
-
-    // for (const t of q.tokens)
-        // if (!text.includes(t)) return false;
-
-    // return true;
-// }
 function matchQuery(text, parsed, wholeWords = true) {
-	if (! parsed) return false;
-    if (parsed.isAll) return true;
+    if (!parsed)
+        return false;
+    if (parsed.isAll)
+        return true;
     text = (text || "").toLowerCase();
     const tokens = parsed.tokens || [];
     const phrases = parsed.phrases || [];
     const not = parsed.not || [];
     const or = parsed.or || [];
-
-    // Phrase prüfen
+    const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const testTerm = (term) => {
+        if (!term)
+            return false;
+        if (!wholeWords) {
+            return text.includes(term);
+        }
+        const hasWildcard = term.includes("*") || term.includes("?");
+        let pattern;
+        if (hasWildcard) {
+            pattern = escapeRegExp(term)
+                .replace(/\\\*/g, "[^\\s]*")
+                .replace(/\\\?/g, "[^\\s]");
+        } else {
+            pattern = escapeRegExp(term);
+        }
+        return new RegExp(`\\b${pattern}\\b`, "u").test(text);
+    };
+    // Phrasen prüfen
     for (const p of phrases) {
         if (!text.includes(p))
             return false;
     }
     // NOT prüfen
     for (const n of not) {
-        if (text.includes(n))
-            return false;
-    }
-    // normale Tokens
-    if (wholeWords) {
-        for (const t of tokens) {
-            const hasWildcard = t.includes("*") || t.includes("?");
-            if (hasWildcard) {
-                let pattern = t.replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex chars
-                               .replace(/\*/g, "[^ ]*")
-                               .replace(/\?/g, "[^ ]");
-                if (!new RegExp(`\\b${pattern}\\b`).test(text)) return false;
-            } else {
-                if (!new RegExp(`\\b${t}\\b`).test(text)) return false;
-            }
-        }
-    } else {
-        for (const t of tokens) {
-            if (!text.includes(t))
+        if (wholeWords) {
+            if (testTerm(n))
+                return false;
+        } else {
+            if (text.includes(n))
                 return false;
         }
     }
-    // OR Bedingungen
+    // Normale Tokens prüfen
+    for (const t of tokens) {
+        if (!testTerm(t))
+            return false;
+    }
+    // OR-Bedingungen prüfen
     if (or.length > 0) {
-        const found = or.some(o => text.includes(o));
+        const found = or.some(testTerm);
         if (!found)
             return false;
     }
     return true;
 }
-
 function tokenize(text) {
     return (text || "")
-        .toLowerCase()
-        .replace(/[^a-z0-9äöüß]/gi, " ")
-        .split(/\s+/)
-        .filter(Boolean);
+    .toLowerCase()
+    .replace(/[^a-z0-9äöüß]/gi, " ")
+    .split(/\s+/)
+    .filter(Boolean);
 }
 //
 //========================================== INDEXER ==========================================
 //
 const QUEUE = [];
 const ACTIVE = new Set();
-
 let running = false;
 const MAX = 2;
-
 let queueIdleResolver = null;
-
 function waitForQueueIdle() {
     if (!running && QUEUE.length === 0 && ACTIVE.size === 0) {
         return Promise.resolve();
     }
-
     return new Promise(resolve => {
         queueIdleResolver = resolve;
     });
 }
-
 function checkQueueIdle() {
     if (QUEUE.length === 0 && ACTIVE.size === 0 && queueIdleResolver) {
         queueIdleResolver();
         queueIdleResolver = null;
     }
 }
-
 function enqueue(job) {
     const key = job.messageId + "|" + job.partName;
-    if (ACTIVE.has(key)) return;
-
+    if (ACTIVE.has(key))
+        return;
     ACTIVE.add(key);
     QUEUE.push(job);
-
     run();
 }
-
 async function run() {
-    if (running) return;
+    if (running)
+        return;
     running = true;
-
-    const workers = Array.from({ length: MAX }, () => worker());
+    const workers = Array.from({
+        length: MAX
+    }, () => worker());
     await Promise.all(workers);
-
     running = false;
 }
-
 async function worker() {
     while (QUEUE.length) {
         const job = QUEUE.shift();
-        if (!job) continue;
-
+        if (!job)
+            continue;
         try {
             await job.handler(job);
         } catch (e) {
             console.error("DocWorker Error", e);
         }
-
         ACTIVE.delete(job.messageId + "|" + job.partName);
-		checkQueueIdle();
+        checkQueueIdle();
     }
 }
-
 async function indexMessage(msg, runQuery = null, wholeWords = true) {
+    if (!msg || !msg.id || !msg.folder?.id) {
+        return false;
+    }
     const full = await browser.messages.getFull(msg.id);
     const parts = [];
     collectAllParts(full, parts);
-
     const messageKey = makeMessageKey(msg.folder.id, msg.id);
-
     const existing = await getIndexedAttachments(messageKey);
     const existingIds = new Set(existing.map(a => a.id));
-
     for (const part of parts) {
         const name = (part.name || part.filename || "").toLowerCase();
-        if (!name) continue;
-
+        if (!name) {
+            continue;
+        }
         const id = messageKey + "|" + part.partName;
-
-        if (existingIds.has(id)) continue;
-
+        if (existingIds.has(id)) {
+            continue;
+        }
         const isXMLFile = name.endsWith(".xml");
         const isPDFFile = name.endsWith(".pdf");
         const isDOCXFile = name.endsWith(".docx");
-
-        // 👉 XML sofort (schnell)
         if (isXMLFile) {
-			const file = await browser.messages.getAttachmentFile(msg.id, part.partName);
-			const buffer = await file.arrayBuffer();
-			if (!buffer || buffer.byteLength === 0) return false;
-
-			const xml = extractXML(buffer);
-			if (!xml || xml.trim().length < 20) return false;
-
-			let meta = {};
-			try {
-				meta = parseEArztbriefXML(xml);
-			} catch (e) {
-				console.warn("eArztbrief Parsing fehlgeschlagen", e);
-			}
-
-
-			const metaText = [
-				meta.patient,
-				meta.birth,
-				meta.gender,
-				meta.doctor,
-				meta.practice,
-				meta.docDate
-			].filter(Boolean).map(normalizeText).join(" ");
-
-			const text = metaText + " " + normalizeText(stripXMLTags(xml));
-			const cleanText = text.toLowerCase();
-			const messageKey = makeMessageKey(msg.folder.id, msg.id);
-//			const hash = await hashBuffer(buffer, part.partName);
-
+            const file = await browser.messages.getAttachmentFile(msg.id, part.partName);
+            const buffer = await file.arrayBuffer();
+            if (!buffer || buffer.byteLength === 0) {
+                continue;
+            }
+            const xml = extractXML(buffer);
+            if (!xml || xml.trim().length < 20) {
+                continue;
+            }
+            let meta = {};
+            try {
+                meta = parseEArztbriefXML(xml);
+            } catch (e) {
+                console.warn("eArztbrief Parsing fehlgeschlagen", e);
+            }
+            const metaText = [
+                meta.patient,
+                meta.birth,
+                meta.gender,
+                meta.doctor,
+                meta.practice,
+                meta.docDate
+            ].filter(Boolean).map(normalizeText).join(" ");
+            const text = metaText + " " + normalizeText(stripXMLTags(xml));
+            const cleanText = text.toLowerCase();
             await put("attachments", {
                 id,
                 messageKey,
-				partName: part.partName,
+                messageId: msg.id,
+                folderId: msg.folder.id,
+                partName: part.partName,
                 attachmentName: name,
-//				hash,
                 text: cleanText,
-				type: "xml",
+                type: "xml",
                 tokens: tokenize(text),
                 tokenized: true
             });
-			await saveMessageMeta(msg.id, { folderId: msg.folder.id, ...meta });
-
-			await streamSearchMatch({
-				date: msg.date ? new Date(msg.date).toISOString() : null,
-				messageId: msg.id,
-				folderId: msg.folder.id,
-				subject: msg.subject,
-				attachmentName: name,
-				text: cleanText
-			});
-
-            // if (runQuery && matchQuery(text, runQuery, wholeWords)) {
-                // sendToSearchWindow({
-                    // type: "search-stream-result",
-                    // result: buildResult(msg, name, true)
-                // });
-            // }
+            await saveMessageMeta(msg.id, {
+                folderId: msg.folder.id,
+                ...meta
+            });
+            await streamSearchMatch({
+                messageKey,
+                date: msg.date ? new Date(msg.date).toISOString() : null,
+                messageId: msg.id,
+                folderId: msg.folder.id,
+                subject: msg.subject,
+                attachmentName: name,
+                text: cleanText
+            });
+            continue;
         }
-
-        // 👉 PDF/DOCX → BACKGROUND
         if (isPDFFile || isDOCXFile) {
             enqueue({
                 messageId: msg.id,
                 partName: part.partName,
                 name,
-                handler: async (job) => {
+                handler: async(job) => {
                     const file = await browser.messages.getAttachmentFile(job.messageId, job.partName);
                     const buffer = await file.arrayBuffer();
-
+                    if (!buffer || buffer.byteLength === 0) {
+                        return;
+                    }
                     const text = await processAttachment(buffer, job.name);
-
+                    const cleanText = (text || "").toLowerCase();
                     await put("attachments", {
                         id,
                         messageKey,
+                        messageId: msg.id,
+                        folderId: msg.folder.id,
+                        partName: job.partName,
                         attachmentName: job.name,
-                        text,
+                        text: cleanText,
+                        type: isPDFFile ? "pdf" : "docx",
                         tokens: tokenize(text),
                         tokenized: true
                     });
-
-                    // 👉 LIVE UPDATE (WICHTIG!)
-                    if (runQuery && matchQuery(text, runQuery, wholeWords)) {
+                    if (runQuery && matchQuery(cleanText, runQuery, wholeWords)) {
                         sendToSearchWindow({
                             type: "search-stream-result",
                             result: buildResult(msg, job.name, true)
@@ -439,116 +420,99 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
             });
         }
     }
-
-    // 👉 nur markieren, KEIN „fertig“
-	const existingMsg = await getMetaCached(messageKey);
-
-	await put("messages", {
-		...existingMsg,
-		messageKey,
-		timestamp: msg.date
-	});
+    const existingMsg = await getMetaCached(messageKey);
+    await put("messages", {
+        ...existingMsg,
+        messageKey,
+        messageId: msg.id,
+        folderId: msg.folder.id,
+        subject: msg.subject || "",
+        unread: msg.read === false,
+        timestamp: msg.date || null
+    });
+    return true;
 }
 async function rebuildIndex(folder, query = null, wholeWords = true) {
-    // 👉 DB leeren
     const db = await initDB();
-
     await new Promise((resolve, reject) => {
         const tx = db.transaction(["attachments", "messages"], "readwrite");
-
         tx.objectStore("attachments").clear();
         tx.objectStore("messages").clear();
-
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
     });
-
-    // 👉 Queue zurücksetzen
+    metaCache.clear();
     QUEUE.length = 0;
     ACTIVE.clear();
     running = false;
-
-    // 👉 Alle Nachrichten laden
-//	console.log("📬 Lade Nachrichten...");
-
-	const messages = [];
-	let page = await browser.messages.list(folder.id);
-
-//	console.log("ERSTE PAGE:", page);
-
-	while (page) {
-//		console.log("PAGE:", page.messages?.length);
-
-		messages.push(...(page.messages || []));
-
-		if (!page.id) break;
-		page = await browser.messages.continueList(page.id);
-	}
-
-//	console.log("📊 TOTAL MESSAGES:", messages.length);
-
-    let total = messages.length;
+    if (DEBUG) {
+        console.log("📬 Lade Nachrichten...");
+    }
+    const messages = [];
+    let page = await browser.messages.list(folder.id);
+    if (DEBUG) {
+        console.log("ERSTE PAGE:", page);
+    }
+    while (page) {
+        if (DEBUG) {
+            console.log("PAGE:", page.messages?.length);
+        }
+        messages.push(...(page.messages || []));
+        if (!page.id) {
+            break;
+        }
+        page = await browser.messages.continueList(page.id);
+    }
+    if (DEBUG) {
+        console.log("📊 TOTAL MESSAGES:", messages.length);
+    }
+    const total = messages.length;
     let current = 0;
-
-    // 👉 Index neu aufbauen (OHNE Suche)
     for (const msg of messages) {
         current++;
-
         sendToSearchWindow({
             type: "index-progress",
             current,
             total
         });
-
         try {
-            await indexMessage(msg, query, wholeWords); // 👉 kein runQuery → reine Indexierung
+            await indexMessage(msg, null, wholeWords);
         } catch (e) {
             console.error("Rebuild Index Fehler:", e);
         }
     }
-
+    await waitForQueueIdle();
     sendToSearchWindow({
         type: "index-progress",
         current: total,
         total
     });
-
-    console.log("Index Rebuild abgeschlossen");
+    if (DEBUG) {
+        console.log("Index Rebuild abgeschlossen");
+    }
 }
 //
-// ----------------------------------------- ATTACHMENTPROCESSOR  ----------------------------------------- 
+// ----------------------------------------- ATTACHMENTPROCESSOR  -----------------------------------------
 //
-
 async function processAttachment(buffer, name) {
     name = name.toLowerCase();
-
     if (name.endsWith(".pdf")) {
         return await extractPDF(buffer);
     }
-
     if (name.endsWith(".docx")) {
         return await extractDOCX(buffer);
     }
-
     return "";
 }
 //
 // DOCQUEUE
 //
-
 //
 //========================================== SEARCH ==========================================
 //
-
 //
-// ----------------------------------------- SEARCHINDEX ----------------------------------------- 
+// ----------------------------------------- SEARCHINDEX -----------------------------------------
 //
-async function searchDB(parsed, wholeWords = true) {
-    const store = await tx("attachments");
-    const all = await promisify(store.getAll());
-
-    return all.filter(e => matchQuery(e.text, parsed, wholeWords));
-}
 // ================= BEST TOKEN =================
 async function getBestToken(tokens) {
     await initDB();
@@ -574,27 +538,21 @@ async function getBestToken(tokens) {
     }
     return best;
 }
-
 const metaCache = new Map();
-
 async function getMetaCached(key) {
     if (!metaCache.has(key)) {
         metaCache.set(key, await getMessageMeta(key));
     }
     return metaCache.get(key);
 }
-
 async function searchIndex(parsed, wholeWords = true) {
     await initDB();
-
     const tokens = parsed.tokens || [];
     // Tokens mit Wildcards können nicht für die Index-Optimierung genutzt werden
     const literalTokens = tokens.filter(t => !t.includes("*") && !t.includes("?"));
     const bestToken = literalTokens.length > 0 ? await getBestToken(literalTokens) : null;
-
     const tx = db.transaction("attachments", "readonly");
     const store = tx.objectStore("attachments");
-
     // Attachments laden
     let attachments = [];
     if (parsed.isAll) {
@@ -608,15 +566,13 @@ async function searchIndex(parsed, wholeWords = true) {
     } else {
         attachments = await promisify(store.getAll());
     }
-
-    if (!Array.isArray(attachments)) attachments = [];
-
+    if (!Array.isArray(attachments))
+        attachments = [];
     const grouped = new Map();
-
     // Treffer bestimmen (nur DB-Daten)
     for (const a of attachments) {
-        if (!matchQuery(a.text || "", parsed, wholeWords)) continue;
-
+        if (!matchQuery(a.text || "", parsed, wholeWords))
+            continue;
         if (!grouped.has(a.messageKey)) {
             const meta = await getMetaCached(a.messageKey) || {};
             grouped.set(a.messageKey, {
@@ -626,86 +582,76 @@ async function searchIndex(parsed, wholeWords = true) {
                 subject: meta.subject || "",
                 timestamp: meta.timestamp || 0,
                 unread: meta.unread || false,
-
                 patient: meta.patient || "",
                 birth: meta.birth || "",
                 gender: meta.gender || "",
                 doctor: meta.doctor || "",
                 practice: meta.practice || "",
                 docDate: meta.docDate || "",
-
                 attachments: [],
                 matched: new Set()
             });
         }
-
         // Treffer merken: ID statt Name
         grouped.get(a.messageKey).matched.add(a.id);
     }
-
-    return { grouped, attachmentMap: attachments.reduce((m, a) => m.set(a.id, a), new Map()) };
+    return {
+        grouped,
+        attachmentMap: attachments.reduce((m, a) => m.set(a.id, a), new Map())
+    };
 }
-
-
 function promisify(req) {
     return new Promise((res, rej) => {
         req.onsuccess = () => res(req.result);
         req.onerror = () => rej(req.error);
     });
 }
-let indexingRunning = false;
-
 let activeQuery = null;
-
-
+let activeWholeWords = true;
 async function runSearch(query, tabId, folder, wholeWords = false) {
-    const parsed = parseQuery(query);
+    const normalizedQuery = (query || "").trim();
+    const effectiveQuery = normalizedQuery === "" ? "*" : normalizedQuery;
+    const parsed = parseQuery(effectiveQuery);
     activeQuery = parsed;
-    if (!parsed.isAll && !parsed.tokens.length && !parsed.phrases.length) {
-        console.warn("⚠️ Leere Query");
-        return;
-    }
-	sendToSearchWindow({
-		type: "search-results",
-		results: [],
-		indexing: false
-	});
-
-    // 1️⃣ DB durchsuchen
+    activeWholeWords = wholeWords;
+    sendToSearchWindow({
+        type: "search-results",
+        results: [],
+        indexing: false
+    });
     const { grouped, attachmentMap } = await searchIndex(parsed, wholeWords);
-
-//    console.log("🔍 Treffer gesamt:", grouped.size);
-	const results = [];
-	
-    // 2️⃣ Ergebnisse bauen
+    if (DEBUG) {
+        console.log("🔍 Treffer gesamt:", grouped.size);
+    }
+    const results = [];
     for (const [messageKey, group] of grouped.entries()) {
         const [folderId, messageIdStr] = messageKey.split("|");
         const messageId = Number(messageIdStr);
-        if (!messageId) continue;
-
+        if (!messageId) {
+            continue;
+        }
         let msg = null;
         try {
             msg = await browser.messages.get(messageId);
         } catch (err) {
-            console.warn("⚠️ Message konnte nicht geladen werden", messageId);
+            console.warn("⚠️ Message konnte nicht geladen werden", messageId, err);
             continue;
         }
-		// 👉 Metadaten laden
-		const meta = await getMetaCached(messageKey) || {};
-		//console.log("Patient:", meta.patient);
-        // 3️⃣ Alle Attachments der Mail holen
+        const meta = await getMetaCached(messageKey) || {};
         let parts = [];
         try {
             const full = await browser.messages.getFull(messageId);
             collectAllParts(full, parts);
         } catch (err) {
-            console.warn("⚠️ getFull fehlgeschlagen für Message", messageId);
+            console.warn("⚠️ getFull fehlgeschlagen für Message", messageId, err);
         }
-
         const attachments = parts
             .filter(p => {
                 const name = p.name || p.filename;
-                return name && (name.toLowerCase().endsWith(".xml") || name.toLowerCase().endsWith(".pdf") || name.toLowerCase().endsWith(".docx"));
+                return name && (
+                    name.toLowerCase().endsWith(".xml") ||
+                    name.toLowerCase().endsWith(".pdf") ||
+                    name.toLowerCase().endsWith(".docx"));
             })
             .map(p => {
                 const name = (p.name || p.filename).toLowerCase();
@@ -713,33 +659,28 @@ async function runSearch(query, tabId, folder, wholeWords = false) {
                 const indexed = attachmentMap.get(id);
                 return {
                     attachmentName: name,
-                    match: group.matched.has(id),         // Treffer-Flag
-                    tokenized: indexed ? indexed.tokenized === true : false // Index-Flag
+                    match: group.matched.has(id),
+                    tokenized: indexed ? indexed.tokenized === true : false,
+                    type: indexed?.type || ""
                 };
             });
-
-        // 4️⃣ Ergebnis an Frontend senden
-//		console.log("Message:", msg.id, "an das Frontend geschickt");
-      // 4️⃣ Mailergebnis speichern
         results.push({
+            messageKey,
             messageId: msg.id,
-            folderId: folderId,
+            folderId,
             timestamp: msg.date,
             subject: msg.subject,
             unread: msg.read === false,
-            tags: msg.tags,
-			// 👉 Metadaten ergänzen
-			patient: meta.patient || "",
-			birth: meta.birth || "",
-			gender: meta.gender || "",
-			doctor: meta.doctor || "",
-			practice: meta.practice || "",
-			docDate: meta.docDate || "",
-			attachments			
+            tags: msg.tags || [],
+            patient: meta.patient || "",
+            birth: meta.birth || "",
+            gender: meta.gender || "",
+            doctor: meta.doctor || "",
+            practice: meta.practice || "",
+            docDate: meta.docDate || "",
+            attachments
         });
     }
-
-    // 5️⃣ Alle Ergebnisse auf einmal an Frontend senden
     sendToSearchWindow({
         type: "search-results",
         results
@@ -752,16 +693,11 @@ function makeMessageKey(folderId, messageId) {
     return folderId + "|" + messageId;
 }
 //
-// ----------------------------------------- EXTRACTORS ----------------------------------------- 
+// ----------------------------------------- EXTRACTORS -----------------------------------------
 //
 function normalizeText(str) {
     return (str || "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
-function isZip(buffer) {
-    const b = new Uint8Array(buffer);
-    return b[0] === 0x50 && b[1] === 0x4B;
-}
-
 function extractXML(buffer) {
     return new TextDecoder("utf-8").decode(buffer);
 }
@@ -786,34 +722,38 @@ async function extractDOCX(arrayBuffer) {
         return "";
     }
 }
-// pdfjsLib muss über <script src="libs/pdfjs/pdf.js"></script> eingebunden sein
-
 async function extractPDF(arrayBuffer) {
-    try {
-        // Lade PDF ohne Worker
+    async function readPdf(disableWorker) {
         const loadingTask = pdfjsLib.getDocument({
             data: arrayBuffer,
-            disableWorker: true,
-            useWorkerFetch: false,
+            disableWorker,
+            useWorkerFetch: !disableWorker,
             isEvalSupported: false
-       });
-
+        });
         const pdf = await loadingTask.promise;
         let text = "";
-
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
-
-            // text zusammenfügen
             const pageText = content.items.map(item => item.str).join(" ");
             text += pageText + "\n";
         }
-
         return text.replace(/\s+/g, " ").trim();
-    } catch (e) {
-        console.error("PDF Fehler:", e);
-        return "";
+    }
+    try {
+        // Primär mit Worker
+        return await readPdf(false);
+    } catch (workerError) {
+        if (DEBUG) {
+            console.warn("PDF Worker fehlgeschlagen, Fallback ohne Worker:", workerError);
+        }
+        try {
+            // Fallback ohne Worker
+            return await readPdf(true);
+        } catch (fallbackError) {
+            console.error("PDF Fehler:", fallbackError);
+            return "";
+        }
     }
 }
 function collectAllParts(node, parts) {
@@ -821,46 +761,18 @@ function collectAllParts(node, parts) {
         node.parts.forEach(p => collectAllParts(p, parts));
     parts.push(node);
 }
-async function hashBuffer(buffer, partName = "") {
-    if (!buffer || buffer.byteLength === 0) {
-        //        console.warn("hashBuffer: Buffer ohne Inhalt", partName);
-        return null;
-    }
-    const data = new Uint8Array(buffer);
-    const extra = new TextEncoder().encode(partName);
-    const combined = new Uint8Array(data.length + extra.length);
-    combined.set(data);
-    combined.set(extra, data.length);
-    const digest = await crypto.subtle.digest("SHA-256", combined);
-    return [...new Uint8Array(digest)]
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-//
-// ================= schauen, ob eine Nachricht bereits gehasht wurde =================
-//
-async function hashExists(hash) {
-    await initDB();
-    return new Promise((resolve) => {
-        const tx = db.transaction("attachments", "readonly");
-        const store = tx.objectStore("attachments");
-        const index = store.index("hash");
-        const req = index.get(hash);
-        req.onsuccess = () => resolve(!!req.result);
-        req.onerror = () => resolve(false);
-    });
-}
 //
 // ================= Meldung an Frontend =================
 //
 async function streamSearchMatch(e) {
-    if (!searchPort || !activeQuery) return;
-    const parsed = activeQuery;
-    if (!matchQuery(e.text, parsed, false)) return;
-
+    if (!searchPort || !activeQuery) {
+        return;
+    }
+    if (!matchQuery(e.text, activeQuery, activeWholeWords)) {
+        return;
+    }
     const messageKey = makeMessageKey(e.folderId, e.messageId);
     const meta = await getMessageMeta(messageKey);
-
     sendToSearchWindow({
         type: "search-stream-result",
         result: {
@@ -879,7 +791,6 @@ async function streamSearchMatch(e) {
         }
     });
 }
-
 //
 // ------------------------------ PARSER ---------------------------------
 //
@@ -935,25 +846,23 @@ function parseEArztbriefXML(xmlString) {
         docDate: attr(docTime, "value")
     };
 }
-
-
 //
-// alle Postfächer suchen
+// alle (KIM-)Postfächer suchen
 //
-async function getAccounts() {
+async function getAccounts(findAll = false) {
     const accounts = await browser.accounts.list();
     const kimAccounts = [];
-    //    const otherAccounts = [];
+    const otherAccounts = [];
     for (const acc of accounts) {
-        if (acc.identities.some(i => i.email.endsWith(".kim.telematik"))) {
+        const isKim = acc.identities?.some(i =>
+                (i.email || "").toLowerCase().endsWith(".kim.telematik")) === true;
+        if (isKim) {
             kimAccounts.push(acc);
-            // nur KIM-Accounts
-            //        } else {
-            //            otherAccounts.push(acc);
+        } else if (findAll) {
+            otherAccounts.push(acc);
         }
     }
-    //    return [...kimAccounts, ...otherAccounts];
-    return [...kimAccounts];
+    return findAll ? [...kimAccounts, ...otherAccounts] : kimAccounts;
 }
 async function getInboxFolderFromAccountId(accountId) {
     if (!accountId)
@@ -998,7 +907,6 @@ async function getInboxFolderFromAccountId(accountId) {
     }
     return findInboxByPath(folders);
 }
-
 //
 // ----------------------------- OPEN ATTACHMENT --------------------------------
 //
@@ -1013,7 +921,8 @@ async function openAttachment(messageId, folderId, attachmentName, tabId) {
             attachmentName = String(attachmentName || "");
             if (name === attachmentName ||
                 name.toLowerCase() === attachmentName.toLowerCase()) {
-                // console.log("MsgID: " + messageId + ", Name: " + name + ", tabId: " + tabId);
+                if (DEBUG)
+                    console.log("MsgID: " + messageId + ", Name: " + name + ", tabId: " + tabId);
                 await browser.messages.openAttachment(
                     messageId,
                     part.partName,
@@ -1028,15 +937,23 @@ async function openAttachment(messageId, folderId, attachmentName, tabId) {
 }
 //
 // ----------------------------------------- RESULTBUILDER -----------------------------------------
-//
 function buildResult(msg, attachmentName, match = false) {
+    const messageKey = makeMessageKey(msg.folder.id, msg.id);
+    const cached = metaCache.get(messageKey) || {};
     return {
+        messageKey,
         messageId: msg.id,
         folderId: msg.folder.id,
         timestamp: msg.date,
         subject: msg.subject,
         unread: msg.read === false,
-
+        tags: msg.tags || [],
+        patient: cached.patient || "",
+        birth: cached.birth || "",
+        gender: cached.gender || "",
+        doctor: cached.doctor || "",
+        practice: cached.practice || "",
+        docDate: cached.docDate || "",
         attachments: [{
                 attachmentName,
                 match,
@@ -1048,22 +965,18 @@ function buildResult(msg, attachmentName, match = false) {
 //
 //========================================== BACKGROUND ==========================================
 //
-
 //
-// ----------------------------------------- MAIN ----------------------------------------- 
+// ----------------------------------------- MAIN -----------------------------------------
 //
-pdfjsLib.GlobalWorkerOptions.workerSrc = "libs/pdfjs/pdf.worker.min.js";
 let searchWindowId = null;
 //
-// ----------------------------------------- MESSAGEHANDLER ----------------------------------------- 
+// ----------------------------------------- MESSAGEHANDLER -----------------------------------------
 //
 let searchPort = null;
-
 // Globales Tracking der angezeigten Nachrichten, um API-Fehler zu umgehen
-const tabToMessage = new Map();
-
 function sendToSearchWindow(msg) {
-    //    console.log("sendToSearchWindow", msg.type, "Port:", searchPort);
+    if (DEBUG)
+        console.log("sendToSearchWindow", msg.type, "Port:", searchPort);
     if (!searchPort) {
         //        console.warn("Popup Port verloren");
         return;
@@ -1075,87 +988,108 @@ function sendToSearchWindow(msg) {
         searchPort = null;
     }
 }
-browser.runtime.onMessage.addListener(async (msg, sender) => {
- 
+browser.runtime.onMessage.addListener(async(msg, sender) => {
     if (msg.type === "get-message-meta-data") {
         const messageKey = makeMessageKey(msg.folderId, msg.messageId);
         const meta = await getMetaCached(messageKey);
         const attachments = await getIndexedAttachments(messageKey);
-        
         return {
             meta,
             hasIndexedAttachments: attachments.length > 0,
             attachments: attachments.map(a => ({
-                name: a.attachmentName,
-                type: a.type
-            }))
+                    name: a.attachmentName,
+                    type: a.type
+                }))
         };
     }
-    
     if (msg.type === "get-current-message-info") {
         // Ermitteln, welche Nachricht in diesem Tab angezeigt wird
         const displayed = await messenger.messageDisplay.getDisplayedMessages(sender.tab.id);
         if (displayed.messages.length > 0) {
             const message = displayed.messages[0];
-            // console.log("Message:", message);
-            if (!message || ! message.author.toLowerCase().includes("kim.telematik")) {
-                return { data: null };
+            if (DEBUG) {
+                console.log("Message:", message);
             }
-            const meta = await getMeta(message);        
+            if (!message || !(message.author || "").toLowerCase().includes("kim.telematik")) {
+                if (!ADDONTEST) {
+                    return { data: null };
+                }
+            }
+            const meta = await getMeta(message);
             if (meta && meta.patient) {
                 const anrede = meta.gender === "M" ? "Herr" : meta.gender === "F" ? "Frau" : "";
-                const data = [
-                    { text: "eArztbrief", bold: true },
-                    { text: ` vom ${formatXfaDateLocal(meta.docDate)} (über ${anrede} ` },
-                    { text: meta.patient, bold: true },
-                    { text: `, geb: ${formatXfaDateLocal(meta.birth)}): ` },
-                    { text: "von Arzt:", bold: true },
-                    { text: ` ${meta.doctor || "nicht angegeben"}, ` },
-                    { text: "Praxis:", bold: true },
-                    { text: ` ${meta.practice || "nicht angegeben"}` }
+                const data = [{
+                        text: "eArztbrief",
+                        bold: true
+                    }, {
+                        text: ` vom ${formatXfaDateLocal(meta.docDate)} (über ${anrede} `
+                    }, {
+                        text: meta.patient,
+                        bold: true
+                    }, {
+                        text: `, geb: ${formatXfaDateLocal(meta.birth)}): `
+                    }, {
+                        text: "von Arzt:",
+                        bold: true
+                    }, {
+                        text: ` ${meta.doctor || "nicht angegeben"}, `
+                    }, {
+                        text: "Praxis:",
+                        bold: true
+                    }, {
+                        text: ` ${meta.practice || "nicht angegeben"}`
+                    }
                 ];
-                return { data };
+                return {
+                    data
+                };
             } else {
-                return { data: [{ text: "(noch) keine Metadaten vorhanden ..." }] };
+                return {
+                  data: null
+                };
             }
         } else {
-            return { data: null };
+            return {
+                data: null
+            };
         }
     }
 });
-
 browser.runtime.onConnect.addListener(port => {
-    if (port.name !== "search-window") return;
-	searchPort = port
+    if (port.name !== "search-window")
+        return;
+    searchPort = port;
     port.onMessage.addListener(async msg => {
         if (msg.type === "close-window") {
-//            console.log("Window Close Nachricht erhalten WinId",searchWindowId);
-            if (!searchWindowId) return;
+            if (DEBUG)
+                console.log("Window Close Nachricht erhalten WinId", searchWindowId);
+            if (!searchWindowId)
+                return;
             browser.windows.remove(searchWindowId);
             searchWindowId = null;
         }
         if (msg.type === "ping") {
             // keep alive
-            console.log("background.js keep alive");
+            if (DEBUG) {
+                console.log("background.js keep alive");
+            }
             return;
         }
-
         if (msg.type === "index-doc") {
             enqueue({
                 ...msg,
-                handler: async (job) => {
+                handler: async(job) => {
                     const file = await browser.messages.getAttachmentFile(job.messageId, job.partName);
                     const buffer = await file.arrayBuffer();
-
                     const text = await processAttachment(buffer, job.name);
-
-                    // 👉 hier speichern
+                    // hier speichern
                 }
             });
         }
         if (msg.type === "set-active-account" && msg.accountId) {
             lastAccountId = msg.accountId;
-//            console.log("Background: lastAccountId gesetzt auf", lastAccountId);
+            if (DEBUG)
+                console.log("Background: lastAccountId gesetzt auf", lastAccountId);
             return;
         }
         if (msg.type === "open-attachment") {
@@ -1163,32 +1097,33 @@ browser.runtime.onConnect.addListener(port => {
             openAttachment(msg.messageId, msg.folderId, msg.attachmentName, tabId);
             return;
         }
-		if (msg.type === "rebuild-index") {
-//			console.log("REBUILD MESSAGE ANGEKOMMEN", msg);
-
-			const folder = await getInboxFolderFromAccountId(msg.accountId);
-
-//			console.log("Folder für Rebuild:", folder);
-
-			if (!folder) {
-				console.error("❌ KEIN FOLDER → Rebuild abgebrochen");
-				return;
-			}
-
-//			console.log("✅ Index Rebuild gestartet");
-
-			await rebuildIndex(folder, msg.query, msg.wholeWords);
-			return;
-		}
-        if (msg.type === "run-attachment-search") {
-            //			console.log("Suche: accountId", msg.accountId);
+        if (msg.type === "rebuild-index") {
+            if (DEBUG)
+                console.log("REBUILD MESSAGE ANGEKOMMEN", msg);
             const folder = await getInboxFolderFromAccountId(msg.accountId);
-            //			console.log("Suche: folder gefunden", folder);
+            if (DEBUG)
+                console.log("Folder für Rebuild:", folder);
+            if (!folder) {
+                console.error("❌ KEIN FOLDER → Rebuild abgebrochen");
+                return;
+            }
+            if (DEBUG)
+                console.log("✅ Index Rebuild gestartet");
+            await rebuildIndex(folder, msg.query, msg.wholeWords);
+            return;
+        }
+        if (msg.type === "run-attachment-search") {
+            if (DEBUG)
+                console.log("Suche: accountId", msg.accountId);
+            const folder = await getInboxFolderFromAccountId(msg.accountId);
+            if (DEBUG)
+                console.log("Suche: folder gefunden", folder);
             if (!folder) {
                 console.warn("Folder nicht gefunden, Rebuild abgebrochen");
                 return;
             }
-            //            console.log("Folder: " + folder);
+            if (DEBUG)
+                console.log("Folder: " + folder);
             runSearch(
                 msg.query,
                 msg.tabId,
@@ -1206,18 +1141,19 @@ browser.runtime.onConnect.addListener(port => {
         }
         if (msg.type === "open-message") {
             const tabId = msg.tabId;
-            //			console.log("open-message received:", msg);
+            if (DEBUG)
+                console.log("open-message received:", msg);
             try {
                 switch (msg.mode) {
                 case "window":
-                     // sonst öffnet Thunderbird, wie er es für richtig hält.
+                    // sonst öffnet Thunderbird, wie er es für richtig hält.
                     await browser.messageDisplay.open({
                         messageId: msg.messageId,
                         location: "window"
                     });
                     break;
                 case "tab":
-                   // Nachricht im Hauptfenster / Tab anzeigen
+                    // Nachricht im Hauptfenster / Tab anzeigen
                     await browser.messageDisplay.open({
                         messageId: msg.messageId
                     });
@@ -1231,7 +1167,7 @@ browser.runtime.onConnect.addListener(port => {
             }
         }
         if (msg.type === "get-accounts") {
-            const accounts = await getAccounts();
+            const accounts = await getAccounts(ADDONTEST);
             port.postMessage({
                 type: "accounts-list",
                 accounts: accounts
@@ -1241,45 +1177,42 @@ browser.runtime.onConnect.addListener(port => {
     port.onDisconnect.addListener(() => {
         searchPort = null;
     });
-
 });
-
-// Aufräumen des Trackings, wenn Tabs geschlossen werden
-browser.tabs.onRemoved.addListener((tabId) => {
-    tabToMessage.delete(tabId);
-});
-
 // --- MV3 Scripting Integration ---
-
 async function onMessageDisplayedInjektor(tab, message) {
     try {
         await messenger.scripting.insertCSS({
-            target: { tabId: tab.id },
+            target: {
+                tabId: tab.id
+            },
             files: ["assets/css/content.css"]
         });
     } catch (e) {
         console.error("KIM: Fehler bei inserCSS:", e);
     }
-    try {    await messenger.scripting.executeScript({
-            target: { tabId: tab.id },
+    try {
+        await messenger.scripting.executeScript({
+            target: {
+                tabId: tab.id
+            },
             files: ["content.js"]
         });
-        // console.log(`KIM: content.js erfolgreich in Tab ${tab.id} injiziert.`);
+        if (DEBUG)
+            console.log(`KIM: content.js erfolgreich in Tab ${tab.id} injiziert.`);
     } catch (e) {
         console.error("KIM: Fehler bei executeScript:", e);
     }
 }
-
 function registerContentInjektor() {
     messenger.messageDisplay.onMessagesDisplayed.addListener(onMessageDisplayedInjektor);
-    // console.log("KIM: Message-Injektor registriert.");
+    if (DEBUG)
+        console.log("KIM: Message-Injektor registriert.");
 }
-
-function unregisterContentInjektor() {
-    messenger.messageDisplay.onMessagesDisplayed.removeListener(onMessageDisplayedInjektor);
-    // console.log("KIM: Message-Injektor unregistriert.");
-}
-
+// function unregisterContentInjektor() {
+    // messenger.messageDisplay.onMessagesDisplayed.removeListener(onMessageDisplayedInjektor);
+    // if (DEBUG)
+        // console.log("KIM: Message-Injektor unregistriert.");
+// }
 //
 // Suchfenster öffnen oder aktivatieren
 //
@@ -1319,67 +1252,72 @@ const MAIL_CHECK_INTERVAL = 30 * 1000; // 30 Sekunden
 let lastAccountId = null; // Merkt sich zuletzt genutztes Account für gezielte Indexierung
 // Polling-Funktion: schaut regelmäßig nach neuen Mails
 async function pollNewMails() {
-    await initDB(); // DB sicherstellen
+    await initDB();
     try {
-        // Nur KIM-Accounts abfragen
-        const kimAccounts = await getAccounts(); // gibt nur KIM-Accounts zurück
-        // Nur INBOX der KIM-Accounts prüfen
-        kimAccounts.forEach(async (kimAccount) => {
+        const kimAccounts = await getAccounts(ADDONTEST);
+        for (const kimAccount of kimAccounts) {
             const inbox = await getInboxFolderFromAccountId(kimAccount.id);
-            if (!inbox)
-                return;
+            if (!inbox) {
+                continue;
+            }
             let page = await browser.messages.list(inbox.id);
             while (page) {
-                for (const msg of page.messages) {
+                for (const msg of page.messages || []) {
+                    if (!msg || !msg.id || !msg.folder?.id) {
+                        continue;
+                    }
                     if (!(await messageAlreadyIndexed(msg.id, msg.folder.id))) {
-                        // Leere Mails oder Anhänge werden ignoriert
-                        if (!msg || !msg.id)
-                            continue;
                         try {
-                            await indexMessage(msg, activeQuery);
+                            await indexMessage(msg, activeQuery, activeWholeWords);
                         } catch (e) {
                             console.error("Index Fehler neue Mail:", e);
                         }
                     }
                 }
-                if (!page.id)
+                if (!page.id) {
                     break;
+                }
                 page = await browser.messages.continueList(page.id);
             }
-            });
+        }
     } catch (e) {
         console.error("Fehler beim Polling neuer Mails:", e);
     }
 }
-
 setInterval(pollNewMails, MAIL_CHECK_INTERVAL);
-const DEBUG_RESET_INDEX = false;
 if (DEBUG_RESET_INDEX) {
-    console.log("KIM Index Engine wird gelöscht ...");
+    if (DEBUG) {
+      console.log("KIM Index Engine wird gelöscht ...");
+    }
     indexedDB.deleteDatabase("kimAttachmentIndex");
 }
-
 initDB().then(() => {
-    console.log("KIM Index Engine bereit");
+    if (DEBUG) {
+        console.log("KIM Index Engine bereit");
+    }
     // Startet die Überwachung für die E-Mail-Anzeige
     registerContentInjektor();
 });
-
 //
 // holt die Metadaten aus einer Mail
 // und indexiert sie, wenn noch nicht geschehen
 // darf nur aus kim.telematik-Mails aufegerufen werden!
 async function getMeta(msg) {
-    // bricht ab, wenn bereits indexiert
-    await indexMessage(msg);
+    if (!msg || !msg.id || !msg.folder?.id) {
+        return {};
+    }
+    if (!(await messageAlreadyIndexed(msg.id, msg.folder.id))) {
+        await indexMessage(msg);
+    }
     const messageKey = makeMessageKey(msg.folder.id, msg.id);
     const meta = await getMetaCached(messageKey);
-    // console.log(meta);
+    if (DEBUG) {
+        console.log(meta);
+    }
     return meta;
 }
-
-
 function formatXfaDateLocal(s) {
-    if (!s || s.length < 8) return s || "Unbekannt";
+    if (!s || s.length < 8)
+        return s || "Unbekannt";
     return `${s.slice(6, 8)}.${s.slice(4, 6)}.${s.slice(0, 4)}`;
 }

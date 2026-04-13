@@ -95,13 +95,48 @@ const PROTECT_AT_LEAST_ONE_COLUMN = true;
 function toSortableTimestamp(value) {
     if (value == null || value === "")
         return 0;
-    if (typeof value === "number")
+
+    if (typeof value === "number") {
         return Number.isFinite(value) ? value : 0;
+    }
+
     if (value instanceof Date) {
         const t = value.getTime();
         return Number.isFinite(t) ? t : 0;
     }
-    const t = new Date(value).getTime();
+
+    const s = String(value).trim();
+
+    // HL7: YYYYMMDD
+    if (/^\d{8}$/.test(s)) {
+        const y = Number(s.slice(0, 4));
+        const m = Number(s.slice(4, 6)) - 1;
+        const d = Number(s.slice(6, 8));
+        return new Date(y, m, d).getTime();
+    }
+
+    // HL7: YYYYMMDDHHMM
+    if (/^\d{12}$/.test(s)) {
+        const y = Number(s.slice(0, 4));
+        const m = Number(s.slice(4, 6)) - 1;
+        const d = Number(s.slice(6, 8));
+        const hh = Number(s.slice(8, 10));
+        const mm = Number(s.slice(10, 12));
+        return new Date(y, m, d, hh, mm, 0).getTime();
+    }
+
+    // HL7: YYYYMMDDHHMMSS
+    if (/^\d{14}$/.test(s)) {
+        const y = Number(s.slice(0, 4));
+        const m = Number(s.slice(4, 6)) - 1;
+        const d = Number(s.slice(6, 8));
+        const hh = Number(s.slice(8, 10));
+        const mm = Number(s.slice(10, 12));
+        const ss = Number(s.slice(12, 14));
+        return new Date(y, m, d, hh, mm, ss).getTime();
+    }
+
+    const t = new Date(s).getTime();
     return Number.isFinite(t) ? t : 0;
 }
 function formatShortDate(dateStr) {
@@ -132,22 +167,36 @@ async function loadColumnSettings() {
     if (Array.isArray(s.visibleColumns) && s.visibleColumns.length) {
         visibleColumns = s.visibleColumns;
     }
+
     if (s.sortSettings && COLUMN_DEFS[s.sortSettings.column]) {
         currentSortColumn = s.sortSettings.column;
         currentSortDir = s.sortSettings.dir === -1 ? -1 : 1;
     }
+
     const res = await browser.storage.local.get("columnSettings");
+
     if (Array.isArray(res.columnSettings) && res.columnSettings.length) {
-        const byKey = new Map(res.columnSettings.map(c => [c.key, c]));
-        columnChooser = COLUMN_DEFS_ORDER.map(key => {
-            const stored = byKey.get(key);
-            return {
-                key,
-                label: COLUMN_DEFS[key].label,
-                visible: stored?.visible ?? visibleColumns.includes(key),
-                width: Number.isFinite(stored?.width) ? stored.width : null
-            };
-        });
+        // Reihenfolge aus gespeichertem Zustand übernehmen
+        columnChooser = res.columnSettings
+            .filter(c => COLUMN_DEFS[c.key])
+            .map(c => ({
+                key: c.key,
+                label: COLUMN_DEFS[c.key].label,
+                visible: c.visible ?? visibleColumns.includes(c.key),
+                width: Number.isFinite(c.width) ? c.width : null
+            }));
+
+        // Fehlende neue Spalten hinten ergänzen
+        for (const key of COLUMN_DEFS_ORDER) {
+            if (!columnChooser.some(c => c.key === key)) {
+                columnChooser.push({
+                    key,
+                    label: COLUMN_DEFS[key].label,
+                    visible: visibleColumns.includes(key),
+                    width: null
+                });
+            }
+        }
     } else {
         columnChooser = COLUMN_DEFS_ORDER.map(key => ({
             key,
@@ -156,8 +205,9 @@ async function loadColumnSettings() {
             width: null
         }));
     }
-    // Sichtbarkeit konsistent halten
+
     visibleColumns = columnChooser.filter(c => c.visible).map(c => c.key);
+
     if (!visibleColumns.length && columnChooser.length) {
         columnChooser[0].visible = true;
         visibleColumns = [columnChooser[0].key];
@@ -337,6 +387,7 @@ async function displayResults(msg) {
         // Neues Format → auf Attachment-Level expandieren
         for (const att of m.attachments) {
             expandedResults.push({
+                messageKey: m.messageKey || `${m.folderId}|${m.messageId}`,
                 messageId: m.messageId,
                 folderId: m.folderId,
                 timestamp: m.timestamp,
@@ -368,16 +419,18 @@ async function displayResults(msg) {
     // 📬 Gruppierung + Rendering
     // =========================================================
     for (const r of filtered) {
-        const docKey = r.messageId + "|" + r.attachmentName;
+        const rowMessageKey = r.messageKey || `${r.folderId}|${r.messageId}`;
+        const docKey = rowMessageKey + "|" + r.attachmentName;
         if (renderedResults.has(docKey)) continue;
         renderedResults.add(docKey);
 
-        let mailRowIndex = mailIndex.get(r.messageId);
+        let mailRowIndex = mailIndex.get(rowMessageKey);
 
         // ===== 📧 Mail-Header =====
         if (mailRowIndex === undefined) {
             const headerRow = {
                 isMailHeader: true,
+                messageKey: rowMessageKey,
                 timestamp: r.timestamp,
                 messageId: r.messageId,
                 folderId: r.folderId,
@@ -396,13 +449,14 @@ async function displayResults(msg) {
             };
 
             mailRowIndex = resultRows.length;
-            mailIndex.set(r.messageId, mailRowIndex);
+            mailIndex.set(rowMessageKey, mailRowIndex);
             resultRows.push(headerRow);
         }
 
         // ===== 📎 Dokument =====
         const docRow = {
             isMailHeader: false,
+            messageKey: rowMessageKey,
             timestamp: r.timestamp,
             messageId: r.messageId,
             folderId: r.folderId,
@@ -608,39 +662,97 @@ function renderTableStructure() {
     container.innerHTML = "";
     lastStartRow = -1;
     lastEndRow = -1;
+
     table = document.createElement("table");
     table.id = "resultsTable";
     container.appendChild(table);
+
     const thead = document.createElement("thead");
     const hr = document.createElement("tr");
+
+    let dragColKey = null;
+
     columnChooser.forEach((col) => {
         if (!col.visible)
             return;
+
         const th = document.createElement("th");
+        th.draggable = true;
+        th.dataset.colKey = col.key;
+
         if (col.width)
             th.style.width = col.width + "px";
         th.style.minWidth = "40px";
+
         let label = col.label;
         if (currentSortColumn === col.key) {
             label += currentSortDir === 1 ? " ▲" : " ▼";
         }
         th.textContent = label;
+
         // Sortierung
         th.addEventListener("click", () => handleSort(col));
+
         // Kontextmenü
         th.addEventListener("contextmenu", e => {
             e.preventDefault();
             openColumnMenu(e.pageX, e.pageY);
         });
+
+        // Drag & Drop für Spaltenreihenfolge
+        th.addEventListener("dragstart", (e) => {
+            dragColKey = col.key;
+            th.classList.add("dragging");
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", col.key);
+        });
+
+        th.addEventListener("dragend", () => {
+            th.classList.remove("dragging");
+        });
+
+        th.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+        });
+
+        th.addEventListener("drop", async (e) => {
+            e.preventDefault();
+
+            const sourceKey = dragColKey || e.dataTransfer.getData("text/plain");
+            const targetKey = col.key;
+
+            if (!sourceKey || sourceKey === targetKey)
+                return;
+
+            const sourceIdx = columnChooser.findIndex(c => c.key === sourceKey);
+            const targetIdx = columnChooser.findIndex(c => c.key === targetKey);
+
+            if (sourceIdx < 0 || targetIdx < 0)
+                return;
+
+            const [moved] = columnChooser.splice(sourceIdx, 1);
+            columnChooser.splice(targetIdx, 0, moved);
+
+            visibleColumns = columnChooser.filter(c => c.visible).map(c => c.key);
+
+            await saveColumnSettings();
+            renderTableStructure();
+            requestRender();
+        });
+
         // Manuelle Spaltenbreite per Drag
         const resizer = document.createElement("div");
         resizer.className = "col-resizer";
         th.appendChild(resizer);
+
         resizer.addEventListener("mousedown", e => {
             e.stopPropagation();
             e.preventDefault();
+
             const startX = e.pageX;
             const startWidth = th.offsetWidth;
+
             function resize(e2) {
                 const newWidth = Math.max(40, startWidth + (e2.pageX - startX));
                 th.style.width = newWidth + "px";
@@ -648,20 +760,26 @@ function renderTableStructure() {
                 if (colObj)
                     colObj.width = newWidth;
             }
+
             function stop() {
                 document.removeEventListener("mousemove", resize);
                 document.removeEventListener("mouseup", stop);
                 saveColumnSettings();
             }
+
             document.addEventListener("mousemove", resize);
             document.addEventListener("mouseup", stop);
         });
+
         hr.appendChild(th);
     });
+
     thead.appendChild(hr);
     table.appendChild(thead);
+
     tbody = document.createElement("tbody");
     table.appendChild(tbody);
+
     initScrollHandler();
 }
 function initScrollHandler() {
@@ -839,8 +957,10 @@ function applyCurrentSort() {
     resultRows = groups.flat();
     mailIndex = new Map();
     for (let i = 0; i < resultRows.length; i++) {
-        if (resultRows[i].isMailHeader)
-            mailIndex.set(resultRows[i].messageId, i);
+        if (resultRows[i].isMailHeader) {
+            const key = resultRows[i].messageKey || `${resultRows[i].folderId}|${resultRows[i].messageId}`;
+            mailIndex.set(key, i);
+        }
     }
     lastStartRow = -1;
     lastEndRow = -1;

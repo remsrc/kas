@@ -1,14 +1,17 @@
+const DEBUG = false;
+
 async function init() {
     // console.log("KIM Content Script geladen, fordere Metadaten an...");
     try {
         const response = await browser.runtime.sendMessage({ type: "get-current-message-info" });
         if (response && response.data) {
             showInfoBar(response.data);
-        // } else {
-        //     const info = "KIM Content: Keine Infos vorhanden" 
-        //     console.log(info);
-        //     showInfoBar(info);
- 
+        } else {
+            if (DEBUG) {
+               const info = "KIM Content: Keine Infos vorhanden" 
+               console.log(info);
+               showInfoBar([{ text:info, bold: true}]);
+            }
         }
     } catch (e) {
         console.error("Fehler beim Abrufen der KIM-Metadaten:", e);
