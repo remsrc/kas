@@ -23,7 +23,7 @@ let currentSort = {
 let resultRows = [];
 let currentSortColumn = "date";
 let currentSortDir = -1;
-let visibleColumns = ["date", "subject", "attachment"];
+let visibleColumns = ["date", "patient", "doctor", "subject", "attachment", "practice"];
 const COLUMN_DEFS = {
     date: {
         label: "Datum",
@@ -378,30 +378,40 @@ async function displayResults(msg) {
     let expandedResults = [];
 
     for (const m of msg.results) {
-        // Falls schon altes Format → direkt übernehmen
-        if (!m.attachments) {
-            expandedResults.push(m);
+        if (!m.messageKey) {
             continue;
         }
 
-        // Neues Format → auf Attachment-Level expandieren
+        const { folderId, messageId } = splitMessageKey(m.messageKey);
+        if (!folderId || !messageId) {
+            continue;
+        }
+
+        if (!m.attachments) {
+            expandedResults.push({
+                ...m,
+                messageKey: m.messageKey,
+                folderId,
+                messageId
+            });
+            continue;
+        }
+
         for (const att of m.attachments) {
             expandedResults.push({
-                messageKey: m.messageKey || `${m.folderId}|${m.messageId}`,
-                messageId: m.messageId,
-                folderId: m.folderId,
+                messageKey: m.messageKey,
+                messageId,
+                folderId,
                 timestamp: m.timestamp,
                 subject: m.subject,
                 unread: m.unread,
                 tags: m.tags,
-
                 patient: m.patient,
                 birth: m.birth,
                 gender: m.gender,
                 doctor: m.doctor,
                 practice: m.practice,
                 docDate: m.docDate,
-
                 attachmentName: att.attachmentName,
                 type: att.type,
                 tokenized: att.tokenized,
@@ -419,13 +429,18 @@ async function displayResults(msg) {
     // 📬 Gruppierung + Rendering
     // =========================================================
     for (const r of filtered) {
-        const rowMessageKey = r.messageKey || `${r.folderId}|${r.messageId}`;
+        if (!r.messageKey) {
+            continue;
+        }
+
+        const rowMessageKey = r.messageKey;
         const docKey = rowMessageKey + "|" + r.attachmentName;
+
         if (renderedResults.has(docKey)) continue;
         renderedResults.add(docKey);
 
         let mailRowIndex = mailIndex.get(rowMessageKey);
-
+    
         // ===== 📧 Mail-Header =====
         if (mailRowIndex === undefined) {
             const headerRow = {
@@ -958,8 +973,10 @@ function applyCurrentSort() {
     mailIndex = new Map();
     for (let i = 0; i < resultRows.length; i++) {
         if (resultRows[i].isMailHeader) {
-            const key = resultRows[i].messageKey || `${resultRows[i].folderId}|${resultRows[i].messageId}`;
-            mailIndex.set(key, i);
+            const key = resultRows[i].messageKey;
+            if (key) {
+                mailIndex.set(key, i);
+            }
         }
     }
     lastStartRow = -1;
@@ -1157,6 +1174,21 @@ function formatTime(ms) {
     const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
     const seconds = String(totalSeconds % 60).padStart(2, "0");
     return `${minutes}:${seconds}`;
+}
+function splitMessageKey(messageKey) {
+    const sep = String(messageKey).lastIndexOf("|");
+    if (sep < 0) {
+        return { folderId: null, messageId: null };
+    }
+
+    const folderId = messageKey.slice(0, sep);
+    const messageIdRaw = messageKey.slice(sep + 1);
+    const messageId = Number(messageIdRaw);
+
+    return {
+        folderId,
+        messageId: Number.isFinite(messageId) ? messageId : null
+    };
 }
 
 function updateDisplay() {

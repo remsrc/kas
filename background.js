@@ -77,10 +77,9 @@ async function put(storeName, value) {
     const store = await tx(storeName, "readwrite");
     return promisify(store.put(value));
 }
-async function messageAlreadyIndexed(messageId, folderId) {
+async function messageAlreadyIndexed(messageKey) {
     const store = await tx("messages");
-    const key = makeMessageKey(folderId, messageId);
-    const res = await promisify(store.get(key));
+    const res = await promisify(store.get(messageKey));
     return !!res;
 }
 async function getIndexedAttachments(messageKey) {
@@ -96,8 +95,8 @@ async function getIndexedAttachments(messageKey) {
 //
 // Metadaten speichern
 //
-async function saveMessageMeta(messageId, meta) {
-    if (!meta)
+async function saveMessageMeta(messageKey, meta) {
+    if (!meta || !messageKey)
         return;
     const hasMeta =
         meta.patient ||
@@ -108,27 +107,15 @@ async function saveMessageMeta(messageId, meta) {
     if (!hasMeta)
         return;
     await initDB();
-    const folderId = meta.folderId;
-    if (!folderId) {
-        console.warn("saveMessageMeta: folderId fehlt", messageId);
-        return;
-    }
-    const messageKey = makeMessageKey(folderId, messageId);
     return new Promise((resolve, reject) => {
         const tx = db.transaction("messages", "readwrite");
         const store = tx.objectStore("messages");
         const getReq = store.get(messageKey);
         getReq.onsuccess = () => {
-            const existing = getReq.result || {
-                messageKey,
-                messageId,
-                folderId
-            };
+            const existing = getReq.result || { messageKey };
             const entry = {
                 ...existing,
                 messageKey,
-                messageId,
-                folderId,
                 patient: meta.patient || existing.patient || "",
                 birth: meta.birth || existing.birth || "",
                 gender: meta.gender || existing.gender || "",
@@ -137,7 +124,6 @@ async function saveMessageMeta(messageId, meta) {
                 docDate: meta.docDate || existing.docDate || ""
             };
             store.put(entry);
-            // Cache aktuell halten
             metaCache.set(messageKey, entry);
         };
         tx.oncomplete = resolve;
@@ -361,8 +347,6 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
             await put("attachments", {
                 id,
                 messageKey,
-                messageId: msg.id,
-                folderId: msg.folder.id,
                 partName: part.partName,
                 attachmentName: name,
                 text: cleanText,
@@ -370,15 +354,10 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
                 tokens: tokenize(text),
                 tokenized: true
             });
-            await saveMessageMeta(msg.id, {
-                folderId: msg.folder.id,
-                ...meta
-            });
+            await saveMessageMeta(messageKey, meta);
             await streamSearchMatch({
                 messageKey,
                 date: msg.date ? new Date(msg.date).toISOString() : null,
-                messageId: msg.id,
-                folderId: msg.folder.id,
                 subject: msg.subject,
                 attachmentName: name,
                 text: cleanText
@@ -401,8 +380,6 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
                     await put("attachments", {
                         id,
                         messageKey,
-                        messageId: msg.id,
-                        folderId: msg.folder.id,
                         partName: job.partName,
                         attachmentName: job.name,
                         text: cleanText,
@@ -424,8 +401,6 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
     await put("messages", {
         ...existingMsg,
         messageKey,
-        messageId: msg.id,
-        folderId: msg.folder.id,
         subject: msg.subject || "",
         unread: msg.read === false,
         timestamp: msg.date || null
@@ -548,12 +523,10 @@ async function getMetaCached(key) {
 async function searchIndex(parsed, wholeWords = true) {
     await initDB();
     const tokens = parsed.tokens || [];
-    // Tokens mit Wildcards können nicht für die Index-Optimierung genutzt werden
     const literalTokens = tokens.filter(t => !t.includes("*") && !t.includes("?"));
     const bestToken = literalTokens.length > 0 ? await getBestToken(literalTokens) : null;
     const tx = db.transaction("attachments", "readonly");
     const store = tx.objectStore("attachments");
-    // Attachments laden
     let attachments = [];
     if (parsed.isAll) {
         attachments = await promisify(store.getAll());
@@ -569,16 +542,16 @@ async function searchIndex(parsed, wholeWords = true) {
     if (!Array.isArray(attachments))
         attachments = [];
     const grouped = new Map();
-    // Treffer bestimmen (nur DB-Daten)
     for (const a of attachments) {
         if (!matchQuery(a.text || "", parsed, wholeWords))
             continue;
         if (!grouped.has(a.messageKey)) {
             const meta = await getMetaCached(a.messageKey) || {};
+            const { folderId, messageId } = splitMessageKey(a.messageKey);
             grouped.set(a.messageKey, {
                 messageKey: a.messageKey,
-                messageId: a.messageId,
-                folderId: a.folderId,
+                messageId,
+                folderId,
                 subject: meta.subject || "",
                 timestamp: meta.timestamp || 0,
                 unread: meta.unread || false,
@@ -592,7 +565,6 @@ async function searchIndex(parsed, wholeWords = true) {
                 matched: new Set()
             });
         }
-        // Treffer merken: ID statt Name
         grouped.get(a.messageKey).matched.add(a.id);
     }
     return {
@@ -625,9 +597,8 @@ async function runSearch(query, tabId, folder, wholeWords = false) {
     }
     const results = [];
     for (const [messageKey, group] of grouped.entries()) {
-        const [folderId, messageIdStr] = messageKey.split("|");
-        const messageId = Number(messageIdStr);
-        if (!messageId) {
+        const { folderId, messageId } = splitMessageKey(messageKey);
+        if (!folderId || !messageId) {
             continue;
         }
         let msg = null;
@@ -691,6 +662,19 @@ async function runSearch(query, tabId, folder, wholeWords = false) {
 //
 function makeMessageKey(folderId, messageId) {
     return folderId + "|" + messageId;
+}
+function splitMessageKey(messageKey) {
+    const sep = String(messageKey).lastIndexOf("|");
+    if (sep < 0) {
+        return { folderId: null, messageId: null };
+    }
+    const folderId = messageKey.slice(0, sep);
+    const messageIdRaw = messageKey.slice(sep + 1);
+    const messageId = Number(messageIdRaw);
+    return {
+        folderId,
+        messageId: Number.isFinite(messageId) ? messageId : null
+    };
 }
 //
 // ----------------------------------------- EXTRACTORS -----------------------------------------
@@ -771,15 +755,19 @@ async function streamSearchMatch(e) {
     if (!matchQuery(e.text, activeQuery, activeWholeWords)) {
         return;
     }
-    const messageKey = makeMessageKey(e.folderId, e.messageId);
+    const messageKey = e.messageKey;
     const meta = await getMessageMeta(messageKey);
+    const { folderId, messageId } = splitMessageKey(messageKey);
+    if (!folderId || !messageId) {
+        return;
+    }
     sendToSearchWindow({
         type: "search-stream-result",
         result: {
             timestamp: e.date ? new Date(e.date).toISOString() : null,
             messageKey,
-            messageId: e.messageId,
-            folderId: e.folderId,
+            messageId,
+            folderId,
             subject: e.subject,
             attachmentName: e.attachmentName,
             patient: meta.patient || "",
@@ -1306,10 +1294,10 @@ async function getMeta(msg) {
     if (!msg || !msg.id || !msg.folder?.id) {
         return {};
     }
-    if (!(await messageAlreadyIndexed(msg.id, msg.folder.id))) {
+    const messageKey = makeMessageKey(msg.folder.id, msg.id);
+    if (!(await messageAlreadyIndexed(messageKey))) {
         await indexMessage(msg);
     }
-    const messageKey = makeMessageKey(msg.folder.id, msg.id);
     const meta = await getMetaCached(messageKey);
     if (DEBUG) {
         console.log(meta);

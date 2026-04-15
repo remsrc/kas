@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "KIM Attachment Search",
     "description": "Sucht in KIM-Anhängen (XML/PDF/DOCX) und zeigt Meta-Daten",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "author": "rem",
     "browser_specific_settings": {
         "gecko": {
