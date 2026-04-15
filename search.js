@@ -23,7 +23,7 @@ let currentSort = {
 let resultRows = [];
 let currentSortColumn = "date";
 let currentSortDir = -1;
-let visibleColumns = ["date", "subject", "attachment"];
+let visibleColumns = ["date", "patient", "doctor", "subject", "attachment", "practice"];
 const COLUMN_DEFS = {
     date: {
         label: "Datum",
