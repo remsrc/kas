@@ -599,13 +599,6 @@ async function runSearch(query, tabId, folder, wholeWords = false) {
     for (const [messageKey, group] of grouped.entries()) {
         const { folderId, messageId } = splitMessageKey(messageKey);
         if (!folderId || !messageId) {
-<<<<<<< HEAD
-            continue;
-        }
-        const messageId = Number(messageIdStr);
-        if (!messageId) {
-=======
->>>>>>> b465c10cb82c0be2dd6a6fc8f52ea17cc9c7f663
             continue;
         }
         let msg = null;
