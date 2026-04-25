@@ -98,38 +98,81 @@ async function getIndexedAttachments(messageKey) {
 async function saveMessageMeta(messageKey, meta) {
     if (!meta || !messageKey)
         return;
+
     const hasMeta =
         meta.patient ||
         meta.birth ||
         meta.doctor ||
         meta.practice ||
-        meta.docDate;
+        meta.docDate ||
+        meta.gender;
+
     if (!hasMeta)
         return;
+
     await initDB();
+
     return new Promise((resolve, reject) => {
         const tx = db.transaction("messages", "readwrite");
         const store = tx.objectStore("messages");
         const getReq = store.get(messageKey);
+
         getReq.onsuccess = () => {
             const existing = getReq.result || { messageKey };
+
             const entry = {
                 ...existing,
                 messageKey,
-                patient: meta.patient || existing.patient || "",
-                birth: meta.birth || existing.birth || "",
-                gender: meta.gender || existing.gender || "",
-                doctor: meta.doctor || existing.doctor || "",
-                practice: meta.practice || existing.practice || "",
-                docDate: meta.docDate || existing.docDate || ""
+                patient: meta.patient ?? "",
+                birth: meta.birth ?? "",
+                gender: meta.gender ?? "",
+                doctor: meta.doctor ?? "",
+                practice: meta.practice ?? "",
+                docDate: meta.docDate ?? ""
             };
+
             store.put(entry);
             metaCache.set(messageKey, entry);
         };
+
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
     });
 }
+async function clearMessageMeta(messageKey) {
+    if (!messageKey)
+        return;
+
+    await initDB();
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction("messages", "readwrite");
+        const store = tx.objectStore("messages");
+        const getReq = store.get(messageKey);
+
+        getReq.onsuccess = () => {
+            const existing = getReq.result || { messageKey };
+
+            const entry = {
+                ...existing,
+                messageKey,
+                patient: "",
+                birth: "",
+                gender: "",
+                doctor: "",
+                practice: "",
+                docDate: ""
+            };
+
+            store.put(entry);
+            metaCache.set(messageKey, entry);
+        };
+
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
 async function getMessageMeta(messageKey) {
     await initDB();
     return new Promise(resolve => {
@@ -140,6 +183,90 @@ async function getMessageMeta(messageKey) {
         req.onerror = () => resolve({});
     });
 }
+function hasAnyMeta(meta) {
+    return !!(
+        meta &&
+        (meta.patient || meta.birth || meta.gender ||
+         meta.doctor || meta.practice || meta.docDate)
+    );
+}
+
+function sameMeta(a, b) {
+    return (
+        (a?.patient || "") === (b?.patient || "") &&
+        (a?.birth || "") === (b?.birth || "") &&
+        (a?.gender || "") === (b?.gender || "") &&
+        (a?.doctor || "") === (b?.doctor || "") &&
+        (a?.practice || "") === (b?.practice || "") &&
+        (a?.docDate || "") === (b?.docDate || "")
+    );
+}
+
+async function extractLiveMetaFromMessage(msg) {
+    if (!msg || !msg.id || !msg.folder?.id) {
+        return null;
+    }
+
+    const full = await browser.messages.getFull(msg.id);
+    const parts = [];
+    collectAllParts(full, parts);
+
+    for (const part of parts) {
+        const name = (part.name || part.filename || "").toLowerCase();
+        if (!name.endsWith(".xml")) {
+            continue;
+        }
+
+        try {
+            const file = await browser.messages.getAttachmentFile(msg.id, part.partName);
+            const buffer = await file.arrayBuffer();
+            if (!buffer || buffer.byteLength === 0) {
+                continue;
+            }
+
+            const xml = extractXML(buffer);
+            if (!xml || xml.trim().length < 20) {
+                continue;
+            }
+
+            const meta = parseEArztbriefXML(xml);
+            if (hasAnyMeta(meta)) {
+                return meta;
+            }
+        } catch (e) {
+            console.warn("Live-Metadatenprüfung fehlgeschlagen:", e);
+        }
+    }
+
+    return null;
+}
+
+async function verifyAndRepairMessageMeta(msg) {
+    if (!msg || !msg.id || !msg.folder?.id) {
+        return {};
+    }
+
+    const messageKey = makeMessageKey(msg.folder.id, msg.id);
+
+    const liveMeta = await extractLiveMetaFromMessage(msg);
+    const storedMeta = await getMessageMeta(messageKey);
+
+    if (liveMeta) {
+        if (!sameMeta(storedMeta, liveMeta)) {
+            await saveMessageMeta(messageKey, liveMeta);
+            return await getMessageMeta(messageKey);
+        }
+        return storedMeta;
+    }
+
+    // Keine XML vorhanden -> ggf. falsche Alt-Metadaten löschen
+    if (hasAnyMeta(storedMeta)) {
+        await clearMessageMeta(messageKey);
+    }
+
+    return {};
+}
+
 //
 // ----------------------------------------- QUERY -----------------------------------------
 //
@@ -300,6 +427,7 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
     if (!msg || !msg.id || !msg.folder?.id) {
         return false;
     }
+    let foundValidXmlMeta = false;
     const full = await browser.messages.getFull(msg.id);
     const parts = [];
     collectAllParts(full, parts);
@@ -354,6 +482,12 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
                 tokens: tokenize(text),
                 tokenized: true
             });
+            if (
+                meta.patient || meta.birth || meta.gender ||
+                meta.doctor || meta.practice || meta.docDate
+            ) {
+                foundValidXmlMeta = true;
+            }
             await saveMessageMeta(messageKey, meta);
             await streamSearchMatch({
                 messageKey,
@@ -398,6 +532,9 @@ async function indexMessage(msg, runQuery = null, wholeWords = true) {
         }
     }
     const existingMsg = await getMetaCached(messageKey);
+    if (!foundValidXmlMeta) {
+        await clearMessageMeta(messageKey);
+    }
     await put("messages", {
         ...existingMsg,
         messageKey,
@@ -675,6 +812,30 @@ function splitMessageKey(messageKey) {
         folderId,
         messageId: Number.isFinite(messageId) ? messageId : null
     };
+}
+//
+
+function formatXfaDateLocal(s) {
+    if (!s || s.length < 8)
+        return s || "Unbekannt";
+    return `${s.slice(6, 8)}.${s.slice(4, 6)}.${s.slice(0, 4)}`;
+}
+// holt die Metadaten aus einer Mail
+// und indexiert sie, wenn noch nicht geschehen
+// darf nur aus kim.telematik-Mails aufegerufen werden!
+async function getMeta(msg) {
+    if (!msg || !msg.id || !msg.folder?.id) {
+        return {};
+    }
+    const messageKey = makeMessageKey(msg.folder.id, msg.id);
+    if (!(await messageAlreadyIndexed(messageKey))) {
+        await indexMessage(msg);
+    }
+    const meta = await getMetaCached(messageKey);
+    if (DEBUG) {
+        console.log(meta);
+    }
+    return meta;
 }
 //
 // ----------------------------------------- EXTRACTORS -----------------------------------------
@@ -1003,7 +1164,7 @@ browser.runtime.onMessage.addListener(async(msg, sender) => {
                     return { data: null };
                 }
             }
-            const meta = await getMeta(message);
+            const meta = await verifyAndRepairMessageMeta(message);
             if (meta && meta.patient) {
                 const anrede = meta.gender === "M" ? "Herr" : meta.gender === "F" ? "Frau" : "";
                 const data = [{
@@ -1166,6 +1327,9 @@ browser.runtime.onConnect.addListener(port => {
         searchPort = null;
     });
 });
+
+/*
+// alt 
 // --- MV3 Scripting Integration ---
 async function onMessageDisplayedInjektor(tab, message) {
     try {
@@ -1191,10 +1355,30 @@ async function onMessageDisplayedInjektor(tab, message) {
         console.error("KIM: Fehler bei executeScript:", e);
     }
 }
+
 function registerContentInjektor() {
     messenger.messageDisplay.onMessagesDisplayed.addListener(onMessageDisplayedInjektor);
     if (DEBUG)
         console.log("KIM: Message-Injektor registriert.");
+}
+*/
+async function registerMessageDisplayScripts() {
+    try {
+        await messenger.scripting.messageDisplay.registerScripts([{
+            id: "kim-message-display",
+            js: [{ file: "content.js" }],
+            css: [{ file: "assets/css/content.css" }]
+        }]);
+
+        if (DEBUG) {
+            console.log("KIM: messageDisplay script registriert.");
+        }
+    } catch (e) {
+        // Kann auftreten, wenn bereits registriert.
+        if (DEBUG) {
+            console.warn("KIM: messageDisplay script Registrierung:", e);
+        }
+    }
 }
 // function unregisterContentInjektor() {
     // messenger.messageDisplay.onMessagesDisplayed.removeListener(onMessageDisplayedInjektor);
@@ -1254,7 +1438,9 @@ async function pollNewMails() {
                     if (!msg || !msg.id || !msg.folder?.id) {
                         continue;
                     }
-                    if (!(await messageAlreadyIndexed(msg.id, msg.folder.id))) {
+                    const messageKey = makeMessageKey(msg.folder.id, msg.id);
+
+                    if (!(await messageAlreadyIndexed(messageKey))) {
                         try {
                             await indexMessage(msg, activeQuery, activeWholeWords);
                         } catch (e) {
@@ -1272,6 +1458,9 @@ async function pollNewMails() {
         console.error("Fehler beim Polling neuer Mails:", e);
     }
 }
+/*
+ * ======================================= START ============================================
+ */
 setInterval(pollNewMails, MAIL_CHECK_INTERVAL);
 if (DEBUG_RESET_INDEX) {
     if (DEBUG) {
@@ -1279,33 +1468,13 @@ if (DEBUG_RESET_INDEX) {
     }
     indexedDB.deleteDatabase("kimAttachmentIndex");
 }
+
 initDB().then(() => {
     if (DEBUG) {
         console.log("KIM Index Engine bereit");
     }
     // Startet die Überwachung für die E-Mail-Anzeige
-    registerContentInjektor();
+    // alt: registerContentInjektor();
+    await registerMessageDisplayScripts();
+
 });
-//
-// holt die Metadaten aus einer Mail
-// und indexiert sie, wenn noch nicht geschehen
-// darf nur aus kim.telematik-Mails aufegerufen werden!
-async function getMeta(msg) {
-    if (!msg || !msg.id || !msg.folder?.id) {
-        return {};
-    }
-    const messageKey = makeMessageKey(msg.folder.id, msg.id);
-    if (!(await messageAlreadyIndexed(messageKey))) {
-        await indexMessage(msg);
-    }
-    const meta = await getMetaCached(messageKey);
-    if (DEBUG) {
-        console.log(meta);
-    }
-    return meta;
-}
-function formatXfaDateLocal(s) {
-    if (!s || s.length < 8)
-        return s || "Unbekannt";
-    return `${s.slice(6, 8)}.${s.slice(4, 6)}.${s.slice(0, 4)}`;
-}
