@@ -1469,12 +1469,11 @@ if (DEBUG_RESET_INDEX) {
     indexedDB.deleteDatabase("kimAttachmentIndex");
 }
 
-initDB().then(() => {
+initDB().then(async () => {
     if (DEBUG) {
         console.log("KIM Index Engine bereit");
     }
     // Startet die Überwachung für die E-Mail-Anzeige
     // alt: registerContentInjektor();
     await registerMessageDisplayScripts();
-
 });
