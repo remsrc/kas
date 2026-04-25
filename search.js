@@ -180,11 +180,11 @@ async function loadColumnSettings() {
         columnChooser = res.columnSettings
             .filter(c => COLUMN_DEFS[c.key])
             .map(c => ({
-                key: c.key,
-                label: COLUMN_DEFS[c.key].label,
-                visible: c.visible ?? visibleColumns.includes(c.key),
-                width: Number.isFinite(c.width) ? c.width : null
-            }));
+                    key: c.key,
+                    label: COLUMN_DEFS[c.key].label,
+                    visible: c.visible ?? visibleColumns.includes(c.key),
+                    width: Number.isFinite(c.width) ? c.width : null
+                }));
 
         // Fehlende neue Spalten hinten ergänzen
         for (const key of COLUMN_DEFS_ORDER) {
@@ -199,11 +199,11 @@ async function loadColumnSettings() {
         }
     } else {
         columnChooser = COLUMN_DEFS_ORDER.map(key => ({
-            key,
-            label: COLUMN_DEFS[key].label,
-            visible: visibleColumns.includes(key),
-            width: null
-        }));
+                    key,
+                    label: COLUMN_DEFS[key].label,
+                    visible: visibleColumns.includes(key),
+                    width: null
+                }));
     }
 
     visibleColumns = columnChooser.filter(c => c.visible).map(c => c.key);
@@ -230,7 +230,8 @@ async function loadSettings() {
     document.getElementById("whole-words").checked = s.wholeWords ?? true;
 }
 function ensurePort() {
-    if (searchPort) return;
+    if (searchPort)
+        return;
 
     searchPort = browser.runtime.connect({
         name: "search-window"
@@ -357,23 +358,24 @@ function updateProgress(done) {
 //
 // mit Mailgruppierung
 async function displayResults(msg) {
-    if (!msg?.results) return;
+    if (!msg?.results)
+        return;
 
-    ensurePort(); // 🔥 wichtig bei Streams
+    ensurePort(); // wichtig bei Streams
 
-    // 🔴 Reset bei neuer Suche
-	if (msg.type === "search-results") {
-		renderedResults.clear();
-		resultRows = [];
-		mailIndex = new Map();
+    // Reset bei neuer Suche
+    if (msg.type === "search-results") {
+        renderedResults.clear();
+        resultRows = [];
+        mailIndex = new Map();
 
-		// 🔥 DAS FEHLT:
-		lastStartRow = -1;
-		lastEndRow = -1;
-	}
-	if (!table) renderTableStructure();
+        lastStartRow = -1;
+        lastEndRow = -1;
+    }
+    if (!table)
+        renderTableStructure();
     // =========================================================
-    // 🔥 NEU: Message → Attachment Expansion (Adapter)
+    // Message → Attachment Expansion (Adapter)
     // =========================================================
     let expandedResults = [];
 
@@ -421,12 +423,12 @@ async function displayResults(msg) {
     }
 
     // =========================================================
-    // 🔍 Filter (UI)
+    // Filter (UI)
     // =========================================================
     const filtered = expandedResults;
 
     // =========================================================
-    // 📬 Gruppierung + Rendering
+    // Gruppierung + Rendering
     // =========================================================
     for (const r of filtered) {
         if (!r.messageKey) {
@@ -436,11 +438,12 @@ async function displayResults(msg) {
         const rowMessageKey = r.messageKey;
         const docKey = rowMessageKey + "|" + r.attachmentName;
 
-        if (renderedResults.has(docKey)) continue;
+        if (renderedResults.has(docKey))
+            continue;
         renderedResults.add(docKey);
 
         let mailRowIndex = mailIndex.get(rowMessageKey);
-    
+
         // ===== 📧 Mail-Header =====
         if (mailRowIndex === undefined) {
             const headerRow = {
@@ -468,7 +471,7 @@ async function displayResults(msg) {
             resultRows.push(headerRow);
         }
 
-        // ===== 📎 Dokument =====
+        // ===== Dokument =====
         const docRow = {
             isMailHeader: false,
             messageKey: rowMessageKey,
@@ -487,7 +490,7 @@ async function displayResults(msg) {
             practice: "",
             docDate: "",
 
-            // 🔥 NEU (optional nutzbar im UI)
+            // (optional nutzbar im UI)
             type: r.type,
             tokenized: r.tokenized,
             match: r.match
@@ -495,7 +498,7 @@ async function displayResults(msg) {
 
         resultRows.splice(mailRowIndex + 1, 0, docRow);
 
-        // 👉 Indizes nachziehen
+        // Indizes nachziehen
         for (const [id, idx] of mailIndex) {
             if (idx > mailRowIndex) {
                 mailIndex.set(id, idx + 1);
@@ -503,14 +506,15 @@ async function displayResults(msg) {
         }
     }
 
-	applyCurrentSort();
-	requestRender();
-	updateResultStatusFromRows();
+    applyCurrentSort();
+    requestRender();
+    updateResultStatusFromRows();
 }
 let renderPending = false;
 
 function requestRender() {
-    if (renderPending) return;
+    if (renderPending)
+        return;
     renderPending = true;
 
     requestAnimationFrame(() => {
@@ -530,11 +534,10 @@ function safePost(msg) {
 async function handleMessage(msg) {
     if (!msg)
         return;
-	if (msg.type === "doc-progress") {
-    updateIndexStatus(
-        `📄 Dokumente: ${msg.current} / ${msg.total} verarbeitet`
-    );
-}
+    if (msg.type === "doc-progress") {
+        updateIndexStatus(
+`📄 Dokumente: ${msg.current} / ${msg.total} verarbeitet`);
+    }
     if (msg.type === "index-progress") {
         indexingActive = true;
         currentMail = msg.current;
@@ -578,19 +581,20 @@ async function handleMessage(msg) {
     if (msg.type === "search-results") {
         if (!msg.results)
             return;
-		updateIndexStatus("");
+        updateIndexStatus("");
         displayResults(msg);
         return;
     }
-	if (msg.type === "search-stream-result") {
-		if (!msg.result) return;
+    if (msg.type === "search-stream-result") {
+        if (!msg.result)
+            return;
 
-		streamedResults++;
+        streamedResults++;
 
-		msg.results = [msg.result];
-		displayResults(msg);
-		return;
-	}
+        msg.results = [msg.result];
+        displayResults(msg);
+        return;
+    }
 }
 //
 // ============== Darstellung ==================
@@ -643,8 +647,8 @@ function openColumnMenu(x, y) {
                 visibleColumns = visibleColumns.filter(c => c !== col.key);
             }
             saveColumnSettings();
-			renderTableStructure();
-			requestRender();
+            renderTableStructure();
+            requestRender();
             menu.remove();
         };
         menu.appendChild(item);
@@ -731,7 +735,7 @@ function renderTableStructure() {
             e.dataTransfer.dropEffect = "move";
         });
 
-        th.addEventListener("drop", async (e) => {
+        th.addEventListener("drop", async(e) => {
             e.preventDefault();
 
             const sourceKey = dragColKey || e.dataTransfer.getData("text/plain");
@@ -836,8 +840,7 @@ async function getTagDetails(message) {
 
     // Standard-Tag-Key finden ($label1 ... $label5)
     const standardTagKey = message.tags.find(tag =>
-        /^\$label[1-5]$/.test(tag)
-    );
+            /^\$label[1-5]$/.test(tag));
 
     if (!standardTagKey) {
         // console.log("Kein Standard-Tag gefunden");
@@ -849,7 +852,7 @@ async function getTagDetails(message) {
 
     if (!tag) {
         return null;
-    } 
+    }
 
     return {
         label: tag.tag,
@@ -858,7 +861,6 @@ async function getTagDetails(message) {
 }
 async function renderVisibleRows(startRow, endRow) {
     const tabId = await getMailTabId();
-    
 
     tbody.innerHTML = "";
     const spacerTop = document.createElement("tr");
@@ -868,18 +870,19 @@ async function renderVisibleRows(startRow, endRow) {
         const r = resultRows[i];
         const tr = document.createElement("tr");
         let tagDetails = await getTagDetails(r);
-        if (tagDetails) tr.style.color = tagDetails.color;
-    
+        if (tagDetails)
+            tr.style.color = tagDetails.color;
+
         if (!r.isMailHeader)
             tr.classList.add("docRow");
         if (r.unread)
             tr.style.fontWeight = "bold";
-		if (!r.isMailHeader && r.match) {
-			tr.classList.add("match-hit");
-		}
-		if (!r.isMailHeader && r.tokenized === false) {
-			tr.classList.add("not-indexed");
-		}
+        if (!r.isMailHeader && r.match) {
+            tr.classList.add("match-hit");
+        }
+        if (!r.isMailHeader && r.tokenized === false) {
+            tr.classList.add("not-indexed");
+        }
         if (r.isMailHeader) {
             // Mail-Header Aktionen
             tr.title =
@@ -905,9 +908,9 @@ async function renderVisibleRows(startRow, endRow) {
                     tabId
                 });
             });
-         } else {
-           // kein Mail-Header
-                   tr.title = `${r.attachmentExt}\nKlick oder Doppelklick: Anhang öffnen`;            // Nachricht / Attachment Aktionen
+        } else {
+            // kein Mail-Header
+            tr.title = `${r.attachmentExt}\nKlick oder Doppelklick: Anhang öffnen`; // Nachricht / Attachment Aktionen
             tr.addEventListener("dblclick", e => {
                 e.preventDefault();
                 safePost({
@@ -928,7 +931,7 @@ async function renderVisibleRows(startRow, endRow) {
                     tabId
                 });
             });
-         }
+        }
         columnChooser.forEach(col => {
             if (!col.visible)
                 return;
@@ -1043,8 +1046,8 @@ function initColumnContextMenu() {
                     visibleColumns = visibleColumns.filter(c => c !== col.key);
                 }
                 saveColumnSettings();
-				renderTableStructure();
-				requestRender();
+                renderTableStructure();
+                requestRender();
                 menu.remove();
             });
             menu.appendChild(item);
@@ -1178,7 +1181,10 @@ function formatTime(ms) {
 function splitMessageKey(messageKey) {
     const sep = String(messageKey).lastIndexOf("|");
     if (sep < 0) {
-        return { folderId: null, messageId: null };
+        return {
+            folderId: null,
+            messageId: null
+        };
     }
 
     const folderId = messageKey.slice(0, sep);
@@ -1193,7 +1199,7 @@ function splitMessageKey(messageKey) {
 
 function updateDisplay() {
     const timerEl = document.getElementById("inactivityTimer");
-    
+
     if (!timerEl) {
         console.error("Element mit der ID 'inactivityTimer' nicht gefunden.");
         return;
@@ -1228,12 +1234,16 @@ function resetInactivityTimer() {
 
     inactivityTimer = setTimeout(() => {
         console.log("Timeout ausgelöst");
-        safePost({ type: "close-window" });
+        safePost({
+            type: "close-window"
+        });
     }, INACTIVITY_LIMIT);
 
     // Countdown zurücksetzen
     remainingTime = INACTIVITY_LIMIT;
-    safePost({ type: "ping" });
+    safePost({
+        type: "ping"
+    });
 
     updateDisplay();
     startCountdown();
