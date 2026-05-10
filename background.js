@@ -1341,35 +1341,7 @@ browser.runtime.onConnect.addListener(port => {
         searchPort = null;
     });
 });
-
-async function ensureMessageDisplayScriptsRegistered() {
-    try {
-        const existing = await messenger.scripting.messageDisplay.getRegisteredScripts({
-            ids: ["kim-message-display"]
-        });
-
-        if (existing && existing.length > 0) {
-            if (DEBUG) {
-                console.log("KIM: messageDisplay script bereits registriert.");
-            }
-            return;
-        }
-
-        await messenger.scripting.messageDisplay.registerScripts([{
-            id: "kim-message-display",
-            js: [{ file: "content.js" }],
-            css: [{ file: "assets/css/content.css" }],
-            runAt: "document_idle"
-        }]);
-
-        if (DEBUG) {
-            console.log("KIM: messageDisplay script registriert.");
-        }
-    } catch (e) {
-        console.error("KIM: messageDisplay script Registrierung fehlgeschlagen:", e);
-    }
-}
-
+/*
 async function injectContentIntoDisplayedMessage(tab, message) {
     if (!tab?.id) {
         return;
@@ -1401,19 +1373,7 @@ async function injectContentIntoDisplayedMessage(tab, message) {
         }
     }
 }
-
-function registerMessageDisplayFallback() {
-    try {
-        messenger.messageDisplay.onMessagesDisplayed.removeListener(injectContentIntoDisplayedMessage);
-    } catch (_) {}
-
-    messenger.messageDisplay.onMessagesDisplayed.addListener(injectContentIntoDisplayedMessage);
-
-    if (DEBUG) {
-        console.log("KIM: onMessagesDisplayed Fallback registriert.");
-    }
-}
-
+*/
 browser.action.onClicked.addListener(async() => {
     if (searchWindowId) {
         try {
@@ -1502,8 +1462,6 @@ async function startup() {
         console.log("KIM Index Engine bereit");
     }
 
-    await ensureMessageDisplayScriptsRegistered();
-    registerMessageDisplayFallback();
 }
 
 browser.runtime.onInstalled.addListener(() => {
