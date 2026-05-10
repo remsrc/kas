@@ -1205,6 +1205,20 @@ browser.runtime.onMessage.addListener(async(msg, sender) => {
     }
 });
 browser.runtime.onConnect.addListener(port => {
+     if (port.name === "kim-message-content") {
+        if (DEBUG) {
+            console.log("KIM: content.js Port verbunden.");
+        }
+
+        port.onDisconnect.addListener(() => {
+            if (DEBUG) {
+                console.log("KIM: content.js Port getrennt.");
+            }
+        });
+
+        return;
+    }
+
     if (port.name !== "search-window")
         return;
     searchPort = port;
@@ -1328,66 +1342,78 @@ browser.runtime.onConnect.addListener(port => {
     });
 });
 
-/*
-// alt 
-// --- MV3 Scripting Integration ---
-async function onMessageDisplayedInjektor(tab, message) {
+async function ensureMessageDisplayScriptsRegistered() {
     try {
-        await messenger.scripting.insertCSS({
-            target: {
-                tabId: tab.id
-            },
-            files: ["assets/css/content.css"]
+        const existing = await messenger.scripting.messageDisplay.getRegisteredScripts({
+            ids: ["kim-message-display"]
         });
-    } catch (e) {
-        console.error("KIM: Fehler bei inserCSS:", e);
-    }
-    try {
-        await messenger.scripting.executeScript({
-            target: {
-                tabId: tab.id
-            },
-            files: ["content.js"]
-        });
-        if (DEBUG)
-            console.log(`KIM: content.js erfolgreich in Tab ${tab.id} injiziert.`);
-    } catch (e) {
-        console.error("KIM: Fehler bei executeScript:", e);
-    }
-}
 
-function registerContentInjektor() {
-    messenger.messageDisplay.onMessagesDisplayed.addListener(onMessageDisplayedInjektor);
-    if (DEBUG)
-        console.log("KIM: Message-Injektor registriert.");
-}
-*/
-async function registerMessageDisplayScripts() {
-    try {
+        if (existing && existing.length > 0) {
+            if (DEBUG) {
+                console.log("KIM: messageDisplay script bereits registriert.");
+            }
+            return;
+        }
+
         await messenger.scripting.messageDisplay.registerScripts([{
             id: "kim-message-display",
             js: [{ file: "content.js" }],
-            css: [{ file: "assets/css/content.css" }]
+            css: [{ file: "assets/css/content.css" }],
+            runAt: "document_idle"
         }]);
 
         if (DEBUG) {
             console.log("KIM: messageDisplay script registriert.");
         }
     } catch (e) {
-        // Kann auftreten, wenn bereits registriert.
+        console.error("KIM: messageDisplay script Registrierung fehlgeschlagen:", e);
+    }
+}
+
+async function injectContentIntoDisplayedMessage(tab, message) {
+    if (!tab?.id) {
+        return;
+    }
+
+    try {
+        await messenger.scripting.insertCSS({
+            target: { tabId: tab.id },
+            files: ["assets/css/content.css"]
+        });
+    } catch (e) {
         if (DEBUG) {
-            console.warn("KIM: messageDisplay script Registrierung:", e);
+            console.warn("KIM: CSS-Fallback-Injektion fehlgeschlagen:", e);
+        }
+    }
+
+    try {
+        await messenger.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content.js"]
+        });
+
+        if (DEBUG) {
+            console.log("KIM: content.js per Fallback injiziert:", tab.id);
+        }
+    } catch (e) {
+        if (DEBUG) {
+            console.warn("KIM: JS-Fallback-Injektion fehlgeschlagen:", e);
         }
     }
 }
-// function unregisterContentInjektor() {
-    // messenger.messageDisplay.onMessagesDisplayed.removeListener(onMessageDisplayedInjektor);
-    // if (DEBUG)
-        // console.log("KIM: Message-Injektor unregistriert.");
-// }
-//
-// Suchfenster öffnen oder aktivatieren
-//
+
+function registerMessageDisplayFallback() {
+    try {
+        messenger.messageDisplay.onMessagesDisplayed.removeListener(injectContentIntoDisplayedMessage);
+    } catch (_) {}
+
+    messenger.messageDisplay.onMessagesDisplayed.addListener(injectContentIntoDisplayedMessage);
+
+    if (DEBUG) {
+        console.log("KIM: onMessagesDisplayed Fallback registriert.");
+    }
+}
+
 browser.action.onClicked.addListener(async() => {
     if (searchWindowId) {
         try {
@@ -1469,11 +1495,23 @@ if (DEBUG_RESET_INDEX) {
     indexedDB.deleteDatabase("kimAttachmentIndex");
 }
 
-initDB().then(async () => {
+async function startup() {
+    await initDB();
+
     if (DEBUG) {
         console.log("KIM Index Engine bereit");
     }
-    // Startet die Überwachung für die E-Mail-Anzeige
-    // alt: registerContentInjektor();
-    await registerMessageDisplayScripts();
+
+    await ensureMessageDisplayScriptsRegistered();
+    registerMessageDisplayFallback();
+}
+
+browser.runtime.onInstalled.addListener(() => {
+    startup().catch(e => console.error("KIM Startup/onInstalled Fehler:", e));
 });
+
+browser.runtime.onStartup.addListener(() => {
+    startup().catch(e => console.error("KIM Startup/onStartup Fehler:", e));
+});
+
+startup().catch(e => console.error("KIM Startup Fehler:", e));
